@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* deep harbor navy — official / maritime */
+  --color-navy-950: #061527;
+  --color-navy-900: #0A1F3D;
+  --color-navy-800: #0E2A52;
+  --color-navy-700: #133A70;
+  --color-navy-600: #1B4C8F;
+  --color-navy-100: #DCE7F5;
+  --color-navy-50: #EFF4FB;
+
+  /* money gold */
+  --color-gold-600: #B45309;
+  --color-gold-500: #F59E0B;
+  --color-gold-400: #F5A623;
+  --color-gold-100: #FEF3C7;
+  --color-gold-50: #FFFBEB;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: #F4F6FA;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.font-display { font-family: var(--font-display); }
+.tnum { font-variant-numeric: tabular-nums; font-family: var(--font-display); letter-spacing: -0.01em; }
+
+.card-shadow { box-shadow: 0 1px 2px rgba(10,31,61,.05), 0 6px 20px -6px rgba(10,31,61,.10); }
+.card-shadow-lg { box-shadow: 0 2px 8px rgba(10,31,61,.07), 0 16px 40px -12px rgba(10,31,61,.18); }
+
+.sidebar-gradient { background-image: linear-gradient(180deg, #0A1F3D 0%, #081B36 55%, #061527 100%); }
+.hero-gradient { background-image: linear-gradient(120deg, #0A1F3D 0%, #133A70 60%, #1B4C8F 100%); }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #C4D2E7; border-radius: 9px; }
+::-webkit-scrollbar-thumb:hover { background: #9FB6D8; }
+
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ---------- print (quotation PDF) ---------- */
+@page { size: A4; margin: 12mm; }
+@media print {
+  body { background: #fff !important; }
+  .no-print { display: none !important; }
+  .print-sheet { box-shadow: none !important; margin: 0 !important; border: 0 !important; max-width: none !important; }
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0A1F3D"/>
+  <!-- container box -->
+  <rect x="12" y="18" width="40" height="24" rx="3" fill="#F5A623"/>
+  <rect x="19" y="18" width="3" height="24" fill="#0A1F3D" opacity=".55"/>
+  <rect x="27" y="18" width="3" height="24" fill="#0A1F3D" opacity=".55"/>
+  <rect x="35" y="18" width="3" height="24" fill="#0A1F3D" opacity=".55"/>
+  <rect x="43" y="18" width="3" height="24" fill="#0A1F3D" opacity=".55"/>
+  <!-- waves -->
+  <path d="M10 50c4 0 4 3 8 3s4-3 8-3 4 3 8 3 4-3 8-3 4 3 8 3 4-3 4-3" stroke="#7FA8E0" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>
