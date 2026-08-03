@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useDb, clientById, nextNo, currentFxWeek } from '../lib/store'
-import { computeDT, quoteTotals, defaultDtInputs } from '../lib/compute'
+import { computeDT, quoteTotals, dtInputsForCol, defaultDtInputs } from '../lib/compute'
 import { chargeTemplate } from '../lib/seed'
 import { peso, fmtDate, uid, addDays, isoDate } from '../lib/format'
-import { Card, Button, PageHeader, SearchInput, QuoteStatusBadge, MarginChip, EmptyState, Select } from '../components/ui'
+import { Card, Button, PageHeader, SearchInput, QuoteStatusBadge, IncomeChip, EmptyState, Select } from '../components/ui'
 
 const FILTERS = ['all', 'draft', 'sent', 'approved', 'booked', 'lost']
 
@@ -21,12 +21,12 @@ export default function Quotes() {
       .filter((x) => {
         if (!s) return true
         const c = clientById(db, x.clientId)?.name || ''
-        return [x.no, c, x.commodity, x.origin, x.dest].join(' ').toLowerCase().includes(s)
+        return [x.no, c, x.commodity, x.originCountry, x.origin, x.dest].join(' ').toLowerCase().includes(s)
       })
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .map((x) => {
-        const dtByCol = Object.fromEntries(x.columns.map((c) => [c, computeDT(x.dtInputs, c, db.settings)]))
-        const t = quoteTotals(x, dtByCol)[x.columns[0]]
+        const dtByCol = Object.fromEntries(x.columns.map((c) => [c, computeDT(dtInputsForCol(x.dtInputs, c), db.settings)]))
+        const t = quoteTotals(x, dtByCol)[x.chosenCol || x.columns[0]]
         return { ...x, t }
       })
   }, [db, q, filter])
@@ -36,17 +36,19 @@ export default function Quotes() {
     const week = currentFxWeek(db)
     update((d) => {
       const lines = chargeTemplate.map((t) => ({
-        id: t.key, label: t.label, kind: t.kind, bocKey: t.bocKey,
-        values: t.kind === 'service' ? { '20FT': { buy: 0, sell: 0 } } : undefined,
+        key: t.key, label: t.label, remark: t.remark, locked: !!t.locked, refundable: !!t.refundable,
+        values: t.locked ? undefined : { '20FT': t.d20 ?? 0 },
       }))
       d.quotes.unshift({
         id, no: nextNo(d, 'quote'), clientId: d.clients[0]?.id ?? null,
-        origin: '', dest: 'Manila (South Harbor)', commodity: '',
+        origin: '', originCountry: '', pickupAddr: '', pol: '', pod: 'Manila (South Harbor)', dest: 'Manila (South Harbor)',
+        grossWeight: 0, volume: 0, deliveryAddr: '', commodity: '',
         columns: ['20FT'], lines,
-        dtInputs: { ...defaultDtInputs(), fxRate: week?.rates?.USD ?? 0 },
+        dtInputs: { ...defaultDtInputs(), fxRate: week?.rates?.USD ?? 0, qtyPerCol: 1 },
         status: 'draft', createdAt: new Date().toISOString(), sentAt: null, approvedAt: null, lostAt: null,
         validUntil: isoDate(addDays(new Date(), d.settings.quoteValidityDays)),
         presentation: 'itemized', signature: null, notes: '', chosenCol: null,
+        finalQuote: { '20FT': 0 },
       })
       d.counters.quote += 1
     })
@@ -58,7 +60,7 @@ export default function Quotes() {
     <div>
       <PageHeader
         title="Quotations"
-        sub="16-line standard template · buy/sell margin discipline · e-sign to 70/30 terms"
+        sub="Digitized inquiry tool — 16 expense lines · final quotation · net income per the 30K–50K profit guide"
         right={<>
           <SearchInput value={q} onChange={setQ} placeholder="Search no., client, commodity…" />
           <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="!w-32">
@@ -78,8 +80,8 @@ export default function Quotes() {
                 <th className="px-5 py-3 font-semibold">Quote</th>
                 <th className="px-3 py-3 font-semibold">Client & cargo</th>
                 <th className="px-3 py-3 font-semibold">Lane</th>
-                <th className="px-3 py-3 font-semibold text-right">Total (sell)</th>
-                <th className="px-3 py-3 font-semibold">Margin</th>
+                <th className="px-3 py-3 font-semibold text-right">Final quotation</th>
+                <th className="px-3 py-3 font-semibold">Net income</th>
                 <th className="px-3 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3 font-semibold text-right">Valid until</th>
               </tr>
@@ -93,11 +95,11 @@ export default function Quotes() {
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-medium text-slate-800">{clientById(db, x.clientId)?.name || '—'}</span>
-                    <span className="block text-[11px] text-slate-400 truncate max-w-[260px]">{x.commodity || 'No commodity yet'}</span>
+                    <span className="block text-[11px] text-slate-400 truncate max-w-[240px]">{x.commodity || 'No commodity yet'}</span>
                   </td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{x.origin || '—'} → {x.dest}</td>
-                  <td className="px-3 py-3 text-right tnum font-semibold">{peso(x.t.sell, 0)}</td>
-                  <td className="px-3 py-3"><MarginChip pctVal={x.t.marginPct} floor={db.settings.marginFloor} /></td>
+                  <td className="px-3 py-3 text-xs text-slate-500">{x.pol || x.origin || '—'} → {x.pod || x.dest}</td>
+                  <td className="px-3 py-3 text-right tnum font-semibold">{peso(x.t.finalQuote, 0)}</td>
+                  <td className="px-3 py-3"><IncomeChip net={x.t.net} floor={db.settings.profitFloor} target={db.settings.profitTarget} /></td>
                   <td className="px-3 py-3"><QuoteStatusBadge status={x.status} /></td>
                   <td className="px-5 py-3 text-right text-xs text-slate-500">{fmtDate(x.validUntil)}</td>
                 </tr>

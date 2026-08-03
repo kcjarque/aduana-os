@@ -173,6 +173,16 @@ export default function ShipmentDetail() {
           <Card>
             <CardHead title="Vessel & references" />
             <div className="p-5 space-y-3">
+              <Field label="Shipping line" hint="Determines the CG / ATP letter format">
+                <select
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy-600/30"
+                  value={sh.carrier || ''}
+                  onChange={(e) => patch({ carrier: e.target.value })}
+                >
+                  <option value="">— Select carrier —</option>
+                  {db.settings.carriers.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </Field>
               <Field label="B/L number"><Input value={sh.blNo} onChange={(e) => patch({ blNo: e.target.value })} /></Field>
               <Field label="Vessel / voyage"><Input value={sh.vessel || ''} onChange={(e) => patch({ vessel: e.target.value })} /></Field>
               <Field label="ETA"><Input type="date" value={sh.eta || ''} onChange={(e) => patch({ eta: e.target.value })} /></Field>

@@ -1,77 +1,68 @@
-import { computeDT, quoteTotals } from './compute'
+import { computeDT, quoteTotals, dtInputsForCol } from './compute'
 import { uid } from './format'
 
 // ---------------------------------------------------------------------------
-// Settings — every BOC fee parameter is editable in Settings; seeded values
-// follow CAO 1-2001 / CAO 2-2001 / CMO lineage. Port charges are SAMPLE
-// figures to be verified against the current PPA / terminal schedule.
+// Settings — every fee parameter mirrors the brokerage's own Excel tools
+// ("COMPUTATION OF DUTIES & TAXES.xlsx", "INQUIRY TOOL.xlsx", legacy
+// "DT CALCULATOR & DOCUMENTATION.xls"). All editable in Settings.
 // ---------------------------------------------------------------------------
 export const defaultSettings = {
   company: {
-    name: 'Aduana Customs Brokerage Services',
+    name: 'H.R. Villa Customs Brokerage',
     tagline: 'Licensed Customs Brokerage & Freight Forwarding',
-    address: 'Suite 1104 Harbour Centre, South Harbor, Port Area, Manila 1018',
-    tin: '007-345-921-000',
-    ccb: 'PRC-CCB No. 2019-1187 · BOC Accreditation CB-4471',
-    phone: '(02) 8527-4410',
-    email: 'ops@aduana.ph',
-    rep: 'Rowena D. Santos, LCB',
+    address: 'Port Area, Manila',
+    tin: '000-000-000-000',
+    ccb: 'PRC-CCB No. ____ · BOC Accreditation ____',
+    phone: '(02) 8000-0000',
+    email: 'ops@hrvilla.ph',
+    rep: 'H.R. Villa, LCB',
   },
   vatRate: 0.12,
-  cds: 280,
-  insuranceGeneral: 0.02,
-  insuranceDG: 0.04,
-  ipfBrackets: [
-    { upTo: 250000, fee: 250 },
-    { upTo: 500000, fee: 500 },
-    { upTo: 750000, fee: 750 },
-  ],
-  ipfMax: 1000,
-  brokerageBrackets: [
-    { upTo: 10000, fee: 1300 },
-    { upTo: 20000, fee: 2000 },
-    { upTo: 30000, fee: 2700 },
-    { upTo: 40000, fee: 3300 },
-    { upTo: 50000, fee: 3600 },
-    { upTo: 60000, fee: 4000 },
-    { upTo: 100000, fee: 4700 },
-    { upTo: 200000, fee: 5050 },
-  ],
-  brokerageExcessBase: 5050,
-  brokerageExcessRate: 0.00125,
-  brokerageExcessOver: 200000,
-  arrastre: { '20FT': 3850, '40FT': 5720, LCL: 1200 },   // sample — verify vs current port tariff
-  wharfage: { '20FT': 760, '40FT': 1140, LCL: 520 },     // sample — verify vs current PPA schedule
+  cds: 265,                    // legacy tool & confirmation copy (quick tool uses 130) — verify current CMO
+  ipf: 2000,                   // flat "STANDARD" per client tools (CAO 2-2001 brackets: 250–1,000)
+  insuranceGeneral: 0.02,      // 2% of value — general cargo
+  insuranceDG: 0.04,           // 4% — dangerous cargo
+  brokerageBase: 5050,         // CAO 1-2001 as applied by the client:
+  brokerageRate: 0.00125,      //   BROKERAGE = DV × 0.125% + 5,050
+  arrastre: { '20FT': 3727, '40FT': 8551, LCL: 4977 },     // client sheet cells D37/D38; LCL ≈ 552.96/CBM × 9
+  wharfage: { '20FT': 519.35, '40FT': 779.05, LCL: 520 },  // client sheet cells D35/D36
+  csfUsd: { '20FT': 5, '40FT': 10 },                       // CSF/CFS: $5 / $10 per cntr × E.R.
+  stdFreight: { LCL: 400, AIR: 300, '20FT': 800, '40FT': 1200 }, // standard dutiable freight (USD)
   quoteValidityDays: 15,
-  marginFloor: 0.08,
+  profitFloor: 30000,          // client guidance: "PROFIT RANGE: 30K-50K"
+  profitTarget: 50000,
   dpSplit: 0.7,
   currencies: ['USD', 'EUR', 'JPY', 'CNY', 'SGD', 'HKD', 'KRW', 'TWD', 'AUD', 'GBP'],
+  carriers: ['Benline', 'China Shipping', 'CMA CGM', 'COSCO', 'Evergreen', 'Hanjin',
+    'K-LINE', 'MCC', 'MOL', 'NYK', 'OOCL', 'RCL', 'SITC', 'SKY Intl.', 'Uni-Ship', 'Wallem', 'Wan Hai'],
 }
 
-// The brokerage's standard 16-line quotation template
+// The client's INQUIRY TOOL — its exact 16 computation lines with remarks.
+// defaults: [20FT, 40FT] PHP amounts from their worked example / remark ranges.
 export const chargeTemplate = [
-  { key: 'duty', label: 'Customs Duty', kind: 'boc', bocKey: 'duty' },
-  { key: 'vat', label: 'Value-Added Tax (12%)', kind: 'boc', bocKey: 'vat' },
-  { key: 'ipf', label: 'Import Processing Fee', kind: 'boc', bocKey: 'ipf' },
-  { key: 'cds', label: 'Customs Documentary Stamp', kind: 'boc', bocKey: 'cds' },
-  { key: 'arrastre', label: 'Arrastre', kind: 'boc', bocKey: 'arrastre' },
-  { key: 'wharfage', label: 'Wharfage', kind: 'boc', bocKey: 'wharfage' },
-  { key: 'brokerage', label: 'Brokerage Fee (CAO 1-2001)', kind: 'boc', bocKey: 'brokerage' },
-  { key: 'freight', label: 'Ocean Freight', kind: 'service' },
-  { key: 'thc', label: 'Terminal Handling Charge', kind: 'service' },
-  { key: 'docs', label: 'Documentation / B/L Fee', kind: 'service' },
-  { key: 'vasp', label: 'VASP / e2m Lodgement Fee', kind: 'service' },
-  { key: 'atp', label: 'Container Guarantee / ATP Processing', kind: 'service' },
-  { key: 'trucking', label: 'Trucking & Inland Delivery', kind: 'service' },
-  { key: 'handling', label: 'Handling / Service Fee', kind: 'service' },
-  { key: 'storage', label: 'Storage / Demurrage Provision', kind: 'service' },
-  { key: 'misc', label: 'Miscellaneous, Notarial & Stamps', kind: 'service' },
+  { key: 'origin', label: 'Origin Charges', remark: '$800.00/20FT / $1,000.00/40FT (EXW only)', d20: 0, d40: 0 },
+  { key: 'freight', label: 'Air / Ocean Freight', remark: '$600.00/20FT / $800.00/40FT', d20: 36000, d40: 48000 },
+  { key: 'destFwd', label: 'Dest. Forwarder Charges', remark: '', d20: 5000, d40: 5000 },
+  { key: 'customsWhse', label: 'Customs Whse & Storage', remark: 'For LCL or AIR shipments only', d20: 0, d40: 0 },
+  { key: 'lines', label: 'Shipping Lines Charges', remark: '20FT-85K / 40FT-120K (beyond the package is chargeable)', d20: 85000, d40: 120000 },
+  { key: 'deposit', label: 'Container Deposit', remark: '20FT 10-15K / 40FT 15-20K (refunded on empty return)', d20: 10000, d40: 15000, refundable: true },
+  { key: 'dt', label: 'Duties & Taxes', remark: 'Auto — BOC computation below', locked: true },
+  { key: 'process', label: 'Customs Process & O.T.', remark: 'Range: 50K-60K for FCL (SGL)', d20: 60000, d40: 60000 },
+  { key: 'arrastre', label: 'Arrastre / Wharfage', remark: '20FT-9K / 40FT-16K', d20: 9000, d40: 16000 },
+  { key: 'wharfinger', label: 'Whse & Wharfinger', remark: 'For LCL or AIR shipments only', d20: 0, d40: 0 },
+  { key: 'trucking', label: 'Trucking & Delivery', remark: 'Within nearby Manila', d20: 15000, d40: 18000 },
+  { key: 'royalty', label: 'Cnee Royalty', remark: '20FT-8K / 40FT-10K', d20: 8000, d40: 10000 },
+  { key: 'misc', label: 'Miscellaneous', remark: '', d20: 5000, d40: 5000 },
+  { key: 'commission', label: 'Commission', remark: 'Range: 3K-5K', d20: 5000, d40: 5000 },
+  { key: 'signing', label: 'Signing Broker', remark: '', d20: 5000, d40: 5000 },
+  { key: 'allin', label: 'All-in Arrangement', remark: '', d20: 0, d40: 0 },
 ]
 
 export const DOC_KEYS = [
-  'Commercial Invoice', 'Packing List', 'Bill of Lading', 'Certificate of Origin',
-  'Import Permit / ATRIG', 'Marine Insurance', 'SAD / IEIRD', 'TAN',
-  'SSDT', 'OLRS / Gate Pass', 'Delivery Receipt',
+  'Commercial Invoice', 'Packing List', 'Bill of Lading', 'Certificate of Origin (Form E/D)',
+  'Import Permit / ATRIG', 'Marine Insurance', 'PRF', 'SDV', "Client's Confirmation Copy",
+  'IEIRD (Import Entry) + Riders', 'CG / ATP Letter (per carrier)', 'TAN', 'SSDT',
+  'OLRS / Gate Pass', 'Delivery Receipt',
 ]
 
 export const STAGES = [
@@ -85,70 +76,104 @@ export const STAGES = [
 ]
 
 // ---------------------------------------------------------------------------
-// AHTN 2022 sample schedule (rates as decimals). SAMPLE DATA — the production
-// dataset is requested from the Tariff Commission (public domain).
+// Tariff library — the client's own "Frequently Used Tariff Headings" list
+// (from DT CALCULATOR & DOCUMENTATION.xls). mfn = their T.R. column;
+// preferential columns default 0% per their "0% IF WITH FORM-E" practice —
+// verify per line against the Tariff Commission schedule.
 // ---------------------------------------------------------------------------
-const T = (code, description, mfn, atiga, acfta, rcep, note) =>
-  ({ code, description, mfn, atiga, acfta, rcep, note: note || '' })
+const TH = (description, code, tr) => ({
+  code, description, mfn: tr, atiga: 0, acfta: 0, rcep: tr, note: '',
+})
 
 export const tariffSeed = [
-  T('8471.30.10', 'Portable computers (laptops, notebooks) ≤10 kg', 0, 0, 0, 0),
-  T('8517.13.00', 'Smartphones', 0, 0, 0, 0),
-  T('8528.72.91', 'LED/LCD colour television sets', 0.10, 0, 0.05, 0.08),
-  T('8415.10.10', 'Split-type air conditioners ≤26.38 kW', 0.10, 0, 0.05, 0.07),
-  T('8418.10.10', 'Combined refrigerator-freezers, household', 0.10, 0, 0.05, 0.08),
-  T('8450.11.10', 'Fully-automatic washing machines ≤10 kg', 0.10, 0, 0.05, 0.08),
-  T('9405.11.90', 'LED luminaires / light fittings', 0.10, 0, 0.05, 0.08),
-  T('8541.43.00', 'Photovoltaic cells assembled in modules (solar panels)', 0, 0, 0, 0),
-  T('8507.60.90', 'Lithium-ion accumulators (batteries)', 0.03, 0, 0, 0.03),
-  T('8443.32.90', 'Printers, capable of connecting to a computer', 0, 0, 0, 0),
-  T('8413.70.10', 'Centrifugal pumps, electrically operated', 0.03, 0, 0, 0.03),
-  T('8481.80.99', 'Valves and similar appliances, other', 0.03, 0, 0, 0.03),
-  T('8501.40.19', 'AC motors, single-phase, other', 0.03, 0, 0, 0.03),
-  T('8708.30.90', 'Brakes and parts thereof, motor vehicles', 0.03, 0, 0, 0.03),
-  T('8708.99.90', 'Other parts & accessories of motor vehicles', 0.03, 0, 0, 0.03),
-  T('8711.20.45', 'Motorcycles 125cc–150cc, CBU', 0.30, 0, 0.20, 0.25),
-  T('8703.23.51', 'Motor cars 1,500–2,000cc, CBU', 0.30, 0, 0.30, 0.30, 'Excise on automobiles applies'),
-  T('4011.10.00', 'New pneumatic tyres, passenger cars', 0.10, 0, 0.05, 0.08),
-  T('7210.41.11', 'Galvanized steel sheets, corrugated', 0.07, 0, 0, 0.05),
-  T('7213.91.20', 'Bars and rods of iron/steel, hot-rolled, <14mm', 0.07, 0, 0, 0.05),
-  T('7308.90.99', 'Structures and parts of structures, iron or steel', 0.10, 0, 0.05, 0.08),
-  T('2523.29.90', 'Portland cement, other', 0.05, 0, 0, 0.05, 'Check safeguard duty'),
-  T('2710.19.71', 'Lubricating oils', 0.03, 0, 0, 0.03, 'Excise on petroleum applies'),
-  T('3907.61.00', 'Poly(ethylene terephthalate), ≥78 ml/g', 0.07, 0, 0, 0.05),
-  T('3923.30.90', 'Plastic bottles, flasks and similar articles', 0.15, 0, 0.10, 0.12),
-  T('3926.90.99', 'Other articles of plastics', 0.15, 0, 0.10, 0.12),
-  T('4819.10.00', 'Cartons, boxes of corrugated paper', 0.15, 0, 0.10, 0.12),
-  T('4802.56.90', 'Uncoated paper, 40–150 g/m², sheets', 0.07, 0, 0.05, 0.05),
-  T('6109.10.10', 'T-shirts of cotton, knitted, for men/boys', 0.15, 0, 0.10, 0.12),
-  T('6110.20.00', 'Pullovers, cardigans of cotton, knitted', 0.15, 0, 0.10, 0.12),
-  T('6203.42.90', "Men's trousers of cotton, other", 0.15, 0, 0.10, 0.12),
-  T('5208.52.00', 'Woven cotton fabrics, printed, plain weave', 0.10, 0, 0.05, 0.08),
-  T('5407.61.90', 'Woven fabrics of non-textured polyester filaments', 0.10, 0, 0.05, 0.08),
-  T('6402.99.90', 'Footwear, outer soles/uppers of rubber or plastics', 0.15, 0, 0.10, 0.12),
-  T('6403.99.90', 'Footwear with leather uppers, other', 0.15, 0, 0.10, 0.12),
-  T('4202.22.90', 'Handbags with outer surface of plastic/textile', 0.15, 0, 0.10, 0.12),
-  T('9503.00.99', "Toys, other (incl. scale models)", 0.05, 0, 0, 0.03),
-  T('9403.60.90', 'Wooden furniture, other', 0.15, 0, 0.10, 0.12),
-  T('9401.61.00', 'Seats with wooden frames, upholstered', 0.15, 0, 0.10, 0.12),
-  T('3304.99.90', 'Beauty / skin-care preparations, other', 0.07, 0, 0.05, 0.05),
-  T('3305.10.90', 'Shampoos, other', 0.07, 0, 0.05, 0.05),
-  T('3401.11.90', 'Soap for toilet use, other', 0.15, 0, 0.10, 0.12),
-  T('3004.90.99', 'Medicaments, put up for retail sale, other', 0.03, 0, 0, 0, 'Many lines duty-free / VAT-exempt'),
-  T('9018.90.30', 'Medical/surgical instruments and appliances', 0, 0, 0, 0),
-  T('2106.90.99', 'Food preparations n.e.s., other', 0.15, 0, 0.10, 0.12, 'FDA LTO/CPR required'),
-  T('1905.31.10', 'Sweet biscuits, not containing cocoa', 0.15, 0, 0.10, 0.12),
-  T('1806.32.00', 'Chocolate, in blocks/slabs/bars, not filled', 0.15, 0, 0.10, 0.12),
-  T('2202.99.90', 'Non-alcoholic beverages, other', 0.15, 0, 0.10, 0.12, 'Sweetened-beverage excise may apply'),
-  T('0901.21.10', 'Coffee, roasted, not decaffeinated', 0.40, 0.05, 0.30, 0.35, 'In-quota/out-quota rates differ'),
-  T('1006.30.99', 'Rice, semi-milled or wholly milled, other', 0.35, 0.35, 0.35, 0.35, 'RA 11203 rice tariffication'),
-  T('1001.99.19', 'Wheat, other than durum, other', 0.07, 0, 0, 0.05),
-  T('1701.99.11', 'Refined cane sugar, white', 0.65, 0.05, 0.50, 0.50, 'In-quota 50% / out-quota 65%'),
-  T('0203.29.00', 'Frozen pork cuts, other', 0.40, 0, 0.30, 0.35, 'MAV in-quota 30% / out-quota 40%'),
-  T('0207.14.91', 'Frozen chicken cuts, other', 0.40, 0, 0.30, 0.35, 'MAV rates apply'),
-  T('0303.53.00', 'Frozen sardines and brisling/sprats', 0.15, 0, 0.10, 0.12),
-  T('1601.00.10', 'Sausages of meat, in airtight containers', 0.15, 0, 0.10, 0.12),
-  T('0402.21.20', 'Milk powder >1.5% fat, unsweetened, >20kg', 0.03, 0, 0, 0.03),
+  TH('Adhesive Tapes', '5906.10.00', 0.10),
+  TH('Art Accessories', '4810.13.19', 0.01),
+  TH('Art Ware (picture frame, flower display, etc.)', '4810.13.19', 0.01),
+  TH('Artificial Eyelashes', '3402.90.12', 0.05),
+  TH('Bathroom Tissue', '4803.00.90', 0.10),
+  TH('Bathroom Ware', '3922.10.00', 0.15),
+  TH('Bath Tub', '6911.90.00', 0.15),
+  TH('Calendar', '4910.00.00', 0.15),
+  TH('Calculator', '9017.10.90', 0.03),
+  TH('Car Windshield', '7002.29.90', 0.10),
+  TH("Children's Bicycle", '8712.00.20', 0.15),
+  TH("Children's Plastic Toys", '9503.00.99', 0.10),
+  TH('Commercial Refrigerator', '8418.50.19', 0.05),
+  TH('Concrete Nails', '7317.00.90', 0.10),
+  TH('Condiments', '2103.90.90', 0.07),
+  TH('Cotton Swabs (cotton buds)', '9619.00.99', 0.15),
+  TH('Curtain Rod', '8302.42.90', 0.10),
+  TH('Dental Chair', '9402.10.10', 0.07),
+  TH('Dental Floss', '3306.20.00', 0.03),
+  TH('Display Racks', '9403.60.90', 0.15),
+  TH('Duck Tape', '3919.90.90', 0.15),
+  TH('Electric Stoves', '8516.90.90', 0.05),
+  TH('Electric Oven (industrial)', '8417.20.00', 0),
+  TH('Eyeglass', '7018.90.00', 0.10),
+  TH('Fabrics', '5208.19.00', 0.10),
+  TH('Face Powder', '3402.90.99', 0.05),
+  TH('Fan', '8414.51.10', 0.07),
+  TH('Flashlight', '8539.29.49', 0.01),
+  TH('Furniture', '9403.60.90', 0.15),
+  TH('Garments (children, mens & womens shirts, etc.)', '6104.12.00', 0.15),
+  TH('G.I. Wire (concrete nails)', '7317.00.90', 0.10),
+  TH('Glass Bottle', '7013.37.00', 0.10),
+  TH('Gloves, PVC Cover', '6116.99.00', 0.15),
+  TH('Hair Accessories (hairpin, earring, wigs, etc.)', '4818.90.00', 0.15),
+  TH('Hardware Items', '8201.90.00', 0.10),
+  TH('Hardware Tool Box', '8201.90.00', 0.10),
+  TH('Hat', '6505.00.90', 0.15),
+  TH('Hot Water Bags', '4014.90.90', 0.03),
+  TH('Household Ware', '3924.10.00', 0.15),
+  TH('Ice Cream Machine', '8476.89.00', 0.03),
+  TH('Incense', '4421.90.99', 0.10),
+  TH('Key Chains', '7326.90.20', 0.15),
+  TH('Kitchenware', '3924.10.00', 0.15),
+  TH('Knitted Gloves', '6116.99.00', 0.15),
+  TH('Ladies Accessories', '4818.90.00', 0.10),
+  TH('Lamps / Lighting', '8513.10.90', 0.07),
+  TH('Lavatory Brush', '9603.90.40', 0.07),
+  TH('Leather Bags', '4202.11.00', 0.15),
+  TH('Leather Shoes', '6404.11.90', 0.15),
+  TH('Mattings', '4016.91.10', 0.07),
+  TH('Microphone', '8518.10.90', 0.05),
+  TH('Nail Cutters', '8214.90.00', 0.10),
+  TH('Notebook / Writing Pad', '4820.10.00', 0.15),
+  TH('Office Supplies (writing pads, paper documents, etc.)', '4820.10.00', 0.15),
+  TH('Oven (household, plastic parts)', '3923.30.20', 0),
+  TH('Packing Boxes', '4819.10.10', 0.07),
+  TH('Packing Tape', '3919.90.90', 0.15),
+  TH('Paper Cup', '8423.69.00', 0.10),
+  TH('Pigments', '3204.17.00', 0.01),
+  TH('Plastic Air Pump', '8414.80.90', 0.01),
+  TH('Plastic Beads', '3926.90.89', 0.03),
+  TH('Plastic Drums / Plastic Cup', '3923.10.90', 0.15),
+  TH('Plastic Gloves', '3926.20.90', 0.15),
+  TH('Plasticware (nipple, plastic hose, etc.)', '3917.29.00', 0.15),
+  TH('Polyester Fabrics', '5208.19.00', 0.10),
+  TH('Push Carts', '8716.80.90', 0.05),
+  TH('PVC Balls', '9506.69.00', 0.01),
+  TH('PVC Pipe', '3917.29.00', 0.15),
+  TH('RTW Garments', '6104.42.00', 0.15),
+  TH('Scarf', '6117.10.90', 0.15),
+  TH('Shoe Materials', '6406.90.39', 0.01),
+  TH('Shower Head', '7326.90.99', 0.15),
+  TH('Slippers', '6402.91.99', 0.15),
+  TH('Snack Foods', '1904.20.90', 0.07),
+  TH('Speakers', '8518.29.90', 0.10),
+  TH('Sporting Goods', '9506.99.00', 0.01),
+  TH('Spray, Made of Plastic', '9616.10.10', 0.07),
+  TH('Stainless Brush', '7222.30.90', 0.03),
+  TH('Sticker', '4811.41.90', 0.01),
+  TH('Sunglasses', '9004.10.00', 0.05),
+  TH('Swimming Goggles', '9004.90.50', 0.05),
+  TH('Swimming Rings', '9506.29.00', 0.01),
+  TH('Travelling Bag', '4202.29.00', 0.15),
+  TH('Umbrella', '6601.99.00', 0.15),
+  TH('Umbrella Nail', '7317.00.90', 0.10),
+  TH('Wall Clock', '9110.90.00', 0.03),
+  TH('Welding Rod', '8311.10.10', 0.10),
+  TH('Writing Paper', '4802.69.00', 0.10),
 ]
 
 // ---------------------------------------------------------------------------
@@ -162,7 +187,6 @@ const daysAgo = (n, h = 10) => {
 
 function buildFxWeeks() {
   const now = new Date()
-  // BOC weekly rate runs Saturday–Friday
   const sat = new Date(now)
   sat.setDate(now.getDate() - ((now.getDay() + 1) % 7))
   sat.setHours(0, 0, 0, 0)
@@ -195,11 +219,11 @@ function buildFxWeeks() {
 }
 
 const clientsSeed = [
-  { name: 'Nova Electronics Distribution Inc.', tin: '221-884-370-000', address: 'EDSA Extension, Pasay City', contact: 'Marielle Chua', email: 'imports@novaelec.ph', phone: '0917 822 4410' },
-  { name: 'Golden Harvest Trading Corp.', tin: '118-450-226-000', address: 'Dasmariñas St., Binondo, Manila', contact: 'Benedict Uy', email: 'ben@goldenharvest.ph', phone: '0917 330 8842' },
-  { name: 'Bella Moda Apparel Imports', tin: '304-772-518-000', address: 'Chino Roces Ave., Makati City', contact: 'Katrina Reyes', email: 'kat@bellamoda.ph', phone: '0906 415 7789' },
+  { name: 'Merit Stainless Steel Inc.', tin: '221-884-370-000', address: 'Marikina City', contact: 'Sir Marco (Marco Angelo Castro)', email: 'castro.marcoangelo16@yahoo.com', phone: '0995 559 2473' },
+  { name: 'Vagus Medical Equipment and Supplies Trading', tin: '118-450-226-000', address: 'Quezon City', contact: 'Ms. Reyes', email: 'imports@vagusmedical.ph', phone: '0917 330 8842' },
+  { name: 'Golden Harvest Trading Corp.', tin: '304-772-518-000', address: 'Dasmariñas St., Binondo, Manila', contact: 'Benedict Uy', email: 'ben@goldenharvest.ph', phone: '0917 822 4410' },
   { name: 'PrimeBuild Construction Supply', tin: '156-903-441-000', address: 'Quirino Hwy, Quezon City', contact: 'Engr. Dario Lim', email: 'purchasing@primebuild.ph', phone: '0928 664 2035' },
-  { name: 'MedEquip Solutions PH', tin: '412-118-905-000', address: 'BGC, Taguig City', contact: 'Dr. Alyssa Tan', email: 'alyssa@medequip.ph', phone: '0917 551 9926' },
+  { name: 'Bella Moda Apparel Imports', tin: '412-118-905-000', address: 'Chino Roces Ave., Makati City', contact: 'Katrina Reyes', email: 'kat@bellamoda.ph', phone: '0906 415 7789' },
   { name: 'Cebu HomeStyle Furnishings', tin: '289-336-702-000', address: 'A.S. Fortuna St., Mandaue, Cebu', contact: 'Ramon Villarosa', email: 'ramon@cebuhomestyle.ph', phone: '0933 402 1188' },
 ].map((c) => ({ id: uid(), ...c }))
 
@@ -211,186 +235,216 @@ const rc = (origin, dest, carrier, container, buyUsd, sellUsd, fromDays, toDays,
 })
 
 const rateCardsSeed = [
-  rc('Shanghai, CN', 'Manila (South Harbor)', 'COSCO', '20FT', 650, 850, 30, 32, 'Incl. BAF/CAF'),
-  rc('Shanghai, CN', 'Manila (South Harbor)', 'COSCO', '40FT', 900, 1150, 30, 32, 'Incl. BAF/CAF'),
-  rc('Ningbo, CN', 'Manila (MICT)', 'Evergreen', '40FT', 880, 1120, 25, 20),
-  rc('Xiamen, CN', 'Cebu', 'SITC', '20FT', 700, 920, 25, 11, 'Transship HK'),
-  rc('Hong Kong', 'Manila (MICT)', 'OOCL', '20FT', 500, 680, 40, 8),
-  rc('Busan, KR', 'Manila (South Harbor)', 'Wan Hai', '40FT', 950, 1200, 35, 24),
-  rc('Kaohsiung, TW', 'Manila (MICT)', 'Wan Hai', '20FT', 520, 700, 35, 5, 'Expiring — renegotiate'),
-  rc('Bangkok, TH', 'Manila (South Harbor)', 'CMA CGM', '40FT', 780, 990, 28, 18),
-  rc('Jakarta, ID', 'Manila (MICT)', 'MCC Transport', '20FT', 690, 880, 45, -3, 'EXPIRED'),
+  rc('Shanghai, CN', 'Manila (South Harbor)', 'COSCO', '20FT', 600, 800, 30, 32, 'Std dutiable rate $800'),
+  rc('Shanghai, CN', 'Manila (South Harbor)', 'COSCO', '40FT', 800, 1100, 30, 32, 'Std dutiable rate $1,200'),
+  rc('Ningbo, CN', 'Manila (MICT)', 'Evergreen', '40FT', 780, 1050, 25, 20),
+  rc('Xiamen, CN', 'Cebu', 'SITC', '20FT', 650, 880, 25, 11, 'Transship HK'),
+  rc('Hong Kong', 'Manila (MICT)', 'OOCL', '20FT', 480, 650, 40, 8),
+  rc('Busan, KR', 'Manila (South Harbor)', 'Wan Hai', '40FT', 900, 1150, 35, 24),
+  rc('Kaohsiung, TW', 'Manila (MICT)', 'Wan Hai', '20FT', 500, 680, 35, 5, 'Expiring — renegotiate'),
+  rc('Bangkok, TH', 'Manila (South Harbor)', 'CMA CGM', '40FT', 760, 980, 28, 18),
+  rc('Jakarta, ID', 'Manila (MICT)', 'MCC', '20FT', 670, 860, 45, -3, 'EXPIRED'),
 ]
 
-// service-line values: { key: [[buy,sell] per column] }
-function makeLines(cols, vals) {
+// Build the 16 inquiry-tool lines. vals: {key: [amt20, amt40]} overrides.
+function makeLines(cols, vals = {}) {
   return chargeTemplate.map((t) => ({
-    id: t.key, label: t.label, kind: t.kind, bocKey: t.bocKey,
-    values: t.kind === 'service'
-      ? Object.fromEntries(cols.map((c, ci) => [c, { buy: vals[t.key]?.[ci]?.[0] ?? 0, sell: vals[t.key]?.[ci]?.[1] ?? 0 }]))
-      : undefined,
+    key: t.key, label: t.label, remark: t.remark,
+    locked: !!t.locked, refundable: !!t.refundable,
+    values: t.locked ? undefined : Object.fromEntries(cols.map((c, ci) => {
+      const ov = vals[t.key]?.[ci]
+      if (ov != null) return [c, ov]
+      return [c, c === '40FT' ? (t.d40 ?? 0) : (t.d20 ?? 0)]
+    })),
   }))
 }
-
-const sv20 = {
-  freight: [[37700, 49300]], thc: [[7300, 8500]], docs: [[1200, 2500]],
-  vasp: [[850, 1500]], atp: [[500, 1800]], trucking: [[8500, 11000]],
-  handling: [[0, 3500]], storage: [[0, 0]], misc: [[300, 800]],
-}
-const sv40 = {
-  freight: [[52200, 66700]], thc: [[10900, 12600]], docs: [[1200, 2500]],
-  vasp: [[850, 1500]], atp: [[500, 1800]], trucking: [[9800, 13500]],
-  handling: [[0, 3800]], storage: [[0, 0]], misc: [[300, 800]],
-}
-const svBoth = Object.fromEntries(Object.keys(sv20).map((k) => [k, [sv20[k][0], sv40[k][0]]]))
 
 function makeSeed() {
   const fxWeeks = buildFxWeeks()
   const fxNow = fxWeeks[0].rates.USD
   const C = clientsSeed
+  const s = defaultSettings
 
   const dti = (over) => ({
     incoterm: 'FOB', currency: 'USD', fxRate: fxNow, freight: 0,
     insuranceMode: 'general', insuranceActual: 0, basis: 'mfn',
-    bankCharges: 0, excise: 0, vatExempt: false, qty: 1,
+    bankCharges: 0, excise: 0, vatExempt: false,
+    mode: 'FCL', n20: 1, n40: 0, qtyPerCol: 1,
     arrastreOverride: null, wharfageOverride: null, brokerageOverride: null,
     ...over,
   })
 
-  const Q = (n, o) => ({
-    id: uid(), no: `AQ-2026-${String(n).padStart(4, '0')}`,
-    presentation: 'itemized', signature: null, notes: '', chosenCol: null,
-    approvedAt: null, sentAt: null, lostAt: null, ...o,
-  })
+  // finalQuote = expenses + margin; computed after building the quote
+  const Q = (n, o, marginByCol) => {
+    const q = {
+      id: uid(), no: `AQ-2026-${String(n).padStart(4, '0')}`,
+      presentation: 'itemized', signature: null, notes: '', chosenCol: null,
+      approvedAt: null, sentAt: null, lostAt: null,
+      // inquiry-tool shipment details
+      originCountry: '', pickupAddr: '', pol: '', pod: 'Manila (South Harbor)',
+      grossWeight: 0, volume: 0, deliveryAddr: '',
+      finalQuote: {}, ...o,
+    }
+    const dtByCol = Object.fromEntries(q.columns.map((c) => [c, computeDT(dtInputsForCol(q.dtInputs, c), s)]))
+    const t = quoteTotals(q, dtByCol)
+    q.columns.forEach((c, i) => {
+      q.finalQuote[c] = Math.round((t[c].expenses + (marginByCol?.[i] ?? 40000)) / 1000) * 1000
+    })
+    return q
+  }
 
   const quotes = [
     Q(101, {
-      clientId: C[0].id, origin: 'Shanghai, CN', dest: 'Manila (South Harbor)',
-      commodity: 'Laptops — 820 units', columns: ['40FT'], lines: makeLines(['40FT'], sv40),
-      dtInputs: dti({ value: 48500, freight: 900, ahtnCode: '8471.30.10', description: 'Portable computers (laptops)', dutyRate: 0 }),
+      clientId: C[0].id, origin: 'Hangzhou, CN', originCountry: 'China',
+      pickupAddr: 'No.1 Xingxing Road, Xingqiao Yuhang, Hangzhou', pol: 'Shanghai Port', pod: 'Manila North Harbor',
+      dest: 'Manila North Harbor', deliveryAddr: 'Marikina',
+      commodity: 'Commercial refrigerator', grossWeight: 5582, volume: 58.78,
+      columns: ['20FT', '40FT'], lines: makeLines(['20FT', '40FT'], { origin: [48000, 60000] }),
+      dtInputs: dti({ incoterm: 'EXWORKS', value: 45000, freight: 800, ahtnCode: '8418.50.19', description: 'Commercial Refrigerator', dutyRate: 0.05 }),
       status: 'booked', createdAt: daysAgo(43), sentAt: daysAgo(42), approvedAt: daysAgo(40),
       validUntil: daysAgo(27).slice(0, 10),
-    }),
+      notes: 'Per inquiry: 0% duty if with Form-E — client to secure CO from supplier.',
+    }, [37000, 30000]),
     Q(102, {
-      clientId: C[2].id, origin: 'Xiamen, CN', dest: 'Manila (MICT)',
-      commodity: 'Cotton T-shirts — 14,400 pcs', columns: ['20FT'], lines: makeLines(['20FT'], sv20),
-      dtInputs: dti({ value: 22000, freight: 650, ahtnCode: '6109.10.10', description: 'T-shirts of cotton, knitted', dutyRate: 0.15 }),
+      clientId: C[1].id, origin: 'Shanghai, CN', originCountry: 'China', pol: 'Shanghai Port',
+      dest: 'Manila (South Harbor)', deliveryAddr: 'Quezon City',
+      commodity: 'Ovens & cables — 4 tariff lines', grossWeight: 3346.8, volume: 28,
+      columns: ['20FT'], lines: makeLines(['20FT']),
+      dtInputs: dti({ value: 20000, freight: 1200, ahtnCode: '8417.20.00', description: 'Electric Oven (industrial)', dutyRate: 0 }),
       status: 'booked', createdAt: daysAgo(30), sentAt: daysAgo(29), approvedAt: daysAgo(27),
       validUntil: daysAgo(14).slice(0, 10),
-    }),
+    }, [45000]),
     Q(103, {
-      clientId: C[3].id, origin: 'Shanghai, CN', dest: 'Manila (South Harbor)',
-      commodity: 'Galvanized steel sheets — 24 MT', columns: ['40FT'], lines: makeLines(['40FT'], sv40),
-      dtInputs: dti({ value: 39000, freight: 900, ahtnCode: '7210.41.11', description: 'Galvanized steel sheets', dutyRate: 0.07 }),
+      clientId: C[3].id, origin: 'Qingdao, CN', originCountry: 'China', pol: 'Qingdao Port',
+      dest: 'Manila (South Harbor)', deliveryAddr: 'Quirino Hwy, QC',
+      commodity: 'Hardware items — assorted', grossWeight: 21000, volume: 55,
+      columns: ['40FT'], lines: makeLines(['40FT']),
+      dtInputs: dti({ value: 39000, freight: 1200, ahtnCode: '8201.90.00', description: 'Hardware Items', dutyRate: 0.10, n20: 0, n40: 1 }),
       status: 'booked', createdAt: daysAgo(22), sentAt: daysAgo(21), approvedAt: daysAgo(19),
       validUntil: daysAgo(6).slice(0, 10),
-    }),
+    }, [42000]),
     Q(104, {
-      clientId: C[1].id, origin: 'Bangkok, TH', dest: 'Manila (South Harbor)',
-      commodity: 'Food preparations — 1,150 ctns', columns: ['20FT'], lines: makeLines(['20FT'], sv20),
-      dtInputs: dti({ value: 18500, freight: 700, ahtnCode: '2106.90.99', description: 'Food preparations n.e.s. (ATIGA Form D)', basis: 'atiga', dutyRate: 0 }),
+      clientId: C[2].id, origin: 'Bangkok, TH', originCountry: 'Thailand', pol: 'Laem Chabang',
+      dest: 'Manila (South Harbor)', deliveryAddr: 'Binondo, Manila',
+      commodity: 'Snack foods — 1,150 ctns', grossWeight: 9800, volume: 26,
+      columns: ['20FT'], lines: makeLines(['20FT']),
+      dtInputs: dti({ value: 18500, freight: 800, ahtnCode: '1904.20.90', description: 'Snack Foods (ATIGA Form D)', basis: 'atiga', dutyRate: 0 }),
       status: 'booked', createdAt: daysAgo(15), sentAt: daysAgo(14), approvedAt: daysAgo(12),
       validUntil: new Date(Date.now() + 1 * 86400000).toISOString().slice(0, 10),
-    }),
+    }, [38000]),
     Q(105, {
-      clientId: C[4].id, origin: 'Hong Kong', dest: 'Manila (MICT)',
-      commodity: 'Medical instruments — 96 crates', columns: ['20FT'], lines: makeLines(['20FT'], sv20),
-      dtInputs: dti({ value: 31000, freight: 520, ahtnCode: '9018.90.30', description: 'Medical/surgical instruments', dutyRate: 0 }),
+      clientId: C[1].id, origin: 'Hong Kong', originCountry: 'Hong Kong', pol: 'Hong Kong',
+      dest: 'Manila (MICT)', deliveryAddr: 'BGC, Taguig',
+      commodity: 'Dental chairs — 24 crates', grossWeight: 6200, volume: 31,
+      columns: ['20FT'], lines: makeLines(['20FT']),
+      dtInputs: dti({ value: 31000, freight: 800, ahtnCode: '9402.10.10', description: 'Dental Chair', dutyRate: 0.07 }),
       status: 'booked', createdAt: daysAgo(10), sentAt: daysAgo(9), approvedAt: daysAgo(8),
       validUntil: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
-    }),
+    }, [48000]),
     Q(106, {
-      clientId: C[5].id, origin: 'Ningbo, CN', dest: 'Cebu',
-      commodity: 'Wooden furniture — 380 pcs', columns: ['20FT', '40FT'], lines: makeLines(['20FT', '40FT'], svBoth),
-      dtInputs: dti({ value: 26400, freight: 780, ahtnCode: '9403.60.90', description: 'Wooden furniture', dutyRate: 0.15 }),
+      clientId: C[5].id, origin: 'Ningbo, CN', originCountry: 'China', pol: 'Ningbo Port',
+      dest: 'Cebu', deliveryAddr: 'Mandaue, Cebu',
+      commodity: 'Furniture & display racks — 380 pcs', grossWeight: 8400, volume: 62,
+      columns: ['20FT', '40FT'], lines: makeLines(['20FT', '40FT']),
+      dtInputs: dti({ value: 26400, freight: 1200, ahtnCode: '9403.60.90', description: 'Furniture', dutyRate: 0.15 }),
       status: 'approved', createdAt: daysAgo(6), sentAt: daysAgo(5), approvedAt: daysAgo(2),
       validUntil: new Date(Date.now() + 9 * 86400000).toISOString().slice(0, 10),
       notes: 'Client to confirm container size on booking.',
-    }),
+    }, [36000, 31000]),
     Q(107, {
-      clientId: C[0].id, origin: 'Shenzhen, CN', dest: 'Manila (MICT)',
-      commodity: 'LED televisions — 640 units', columns: ['40FT'], lines: makeLines(['40FT'], sv40),
-      dtInputs: dti({ value: 52000, freight: 950, ahtnCode: '8528.72.91', description: 'LED colour television sets', dutyRate: 0.10 }),
+      clientId: C[0].id, origin: 'Shenzhen, CN', originCountry: 'China', pol: 'Yantian',
+      dest: 'Manila (MICT)', deliveryAddr: 'Marikina',
+      commodity: 'Kitchenware & household ware', grossWeight: 12500, volume: 60,
+      columns: ['40FT'], lines: makeLines(['40FT']),
+      dtInputs: dti({ value: 52000, freight: 1200, ahtnCode: '3924.10.00', description: 'Kitchenware', dutyRate: 0.15, n20: 0, n40: 1 }),
       status: 'sent', createdAt: daysAgo(4), sentAt: daysAgo(3),
       validUntil: new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10),
-    }),
+    }, [44000]),
     Q(108, {
-      clientId: C[1].id, origin: 'Ho Chi Minh, VN', dest: 'Manila (South Harbor)',
-      commodity: 'Roasted coffee — 18 MT', columns: ['20FT'], lines: makeLines(['20FT'], sv20),
-      dtInputs: dti({ value: 24000, freight: 600, ahtnCode: '0901.21.10', description: 'Coffee, roasted (ATIGA Form D)', basis: 'atiga', dutyRate: 0.05 }),
+      clientId: C[2].id, origin: 'Guangzhou, CN', originCountry: 'China', pol: 'Nansha',
+      dest: 'Manila (South Harbor)', deliveryAddr: 'Divisoria, Manila',
+      commodity: 'RTW garments — 6,200 pcs', grossWeight: 7300, volume: 24,
+      columns: ['20FT'], lines: makeLines(['20FT']),
+      dtInputs: dti({ value: 24000, freight: 800, ahtnCode: '6104.42.00', description: 'RTW Garments', dutyRate: 0.15 }),
       status: 'sent', createdAt: daysAgo(1, 9), sentAt: daysAgo(1, 14),
       validUntil: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-    }),
+    }, [35000]),
     Q(109, {
-      clientId: C[3].id, origin: 'Qingdao, CN', dest: 'Manila (South Harbor)',
-      commodity: 'Portland cement — 560 bags', columns: ['40FT'], lines: makeLines(['40FT'], sv40),
-      dtInputs: dti({ value: 21000, freight: 880, ahtnCode: '2523.29.90', description: 'Portland cement', dutyRate: 0.05 }),
+      clientId: C[3].id, origin: 'Shanghai, CN', originCountry: 'China', pol: 'Shanghai Port',
+      dest: 'Manila (South Harbor)', deliveryAddr: 'Caloocan',
+      commodity: 'Welding rods & G.I. wire — LCL 9 CBM', grossWeight: 4200, volume: 9,
+      columns: ['LCL'], lines: makeLines(['LCL'], {
+        freight: [31000], customsWhse: [27000], lines: [0], deposit: [0],
+        process: [55000], arrastre: [4977], wharfinger: [13500], trucking: [9000],
+        royalty: [0], misc: [5000], commission: [4000], signing: [5000],
+      }),
+      dtInputs: dti({ value: 21000, freight: 400, ahtnCode: '8311.10.10', description: 'Welding Rod', dutyRate: 0.10, mode: 'LCL' }),
       status: 'draft', createdAt: daysAgo(0, 9),
       validUntil: new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10),
-    }),
+      notes: 'LCL via consolidation — see Consolidation Calculator for CBM breakdown.',
+    }, [34000]),
     Q(110, {
-      clientId: C[2].id, origin: 'Guangzhou, CN', dest: 'Manila (MICT)',
-      commodity: 'Rubber footwear — 6,200 pairs', columns: ['20FT'], lines: makeLines(['20FT'], sv20),
-      dtInputs: dti({ value: 19800, freight: 640, ahtnCode: '6402.99.90', description: 'Footwear, rubber/plastic uppers', dutyRate: 0.15 }),
+      clientId: C[4].id, origin: 'Guangzhou, CN', originCountry: 'China', pol: 'Nansha',
+      dest: 'Manila (MICT)', deliveryAddr: 'Makati',
+      commodity: 'Slippers — 6,200 pairs', grossWeight: 6800, volume: 27,
+      columns: ['20FT'], lines: makeLines(['20FT']),
+      dtInputs: dti({ value: 19800, freight: 800, ahtnCode: '6402.91.99', description: 'Slippers', dutyRate: 0.15 }),
       status: 'lost', createdAt: daysAgo(19), sentAt: daysAgo(18), lostAt: daysAgo(12),
       validUntil: daysAgo(3).slice(0, 10), notes: 'Lost on price — competitor quoted all-in ₱12k lower.',
-    }),
+    }, [52000]),
     Q(111, {
-      clientId: C[4].id, origin: 'Busan, KR', dest: 'Manila (South Harbor)',
-      commodity: 'Industrial valves — 210 crates', columns: ['40FT'], lines: makeLines(['40FT'], sv40),
-      dtInputs: dti({ value: 44000, freight: 1000, ahtnCode: '8481.80.99', description: 'Valves and similar appliances', dutyRate: 0.03 }),
+      clientId: C[1].id, origin: 'Busan, KR', originCountry: 'South Korea', pol: 'Busan',
+      dest: 'Manila (South Harbor)', deliveryAddr: 'Taguig',
+      commodity: 'Microphones & speakers — 210 crates', grossWeight: 5100, volume: 48,
+      columns: ['40FT'], lines: makeLines(['40FT']),
+      dtInputs: dti({ value: 44000, freight: 1200, ahtnCode: '8518.10.90', description: 'Microphone', dutyRate: 0.05, n20: 0, n40: 1 }),
       status: 'booked', createdAt: daysAgo(48), sentAt: daysAgo(47), approvedAt: daysAgo(45),
       validUntil: daysAgo(32).slice(0, 10),
-    }),
+    }, [41000]),
   ]
 
   // -------- shipments (from booked quotes) --------
-  const s = defaultSettings
-  const totalOf = (q, col) => {
-    const dtByCol = Object.fromEntries(q.columns.map((c) => [c, computeDT(q.dtInputs, c, s)]))
-    return quoteTotals(q, dtByCol)[col].sell
-  }
+  const finalOf = (q, col) => Number(q.finalQuote[col]) || 0
   const docs = (upTo, baseDay) => Object.fromEntries(
-    DOC_KEYS.map((k, idx) => [k, idx < upTo ? { done: true, date: daysAgo(baseDay - idx).slice(0, 10) } : { done: false, date: null }])
+    DOC_KEYS.map((k, idx) => [k, idx < upTo ? { done: true, date: daysAgo(Math.max(0, baseDay - idx)).slice(0, 10) } : { done: false, date: null }])
   )
   const SH = (n, q, o) => {
-    const total = totalOf(q, o.col)
+    const total = finalOf(q, o.col)
+    const dpAmt = Math.round(total * s.dpSplit)
+    q.chosenCol = o.col
     return {
       id: uid(), refNo: `SH-2026-${String(n).padStart(4, '0')}`, quoteId: q.id, clientId: q.clientId,
-      containerLabel: `1×${o.col}`, col: o.col,
-      billing: {
-        total, dpAmt: Math.round(total * s.dpSplit), balAmt: total - Math.round(total * s.dpSplit),
-        dpPaidAt: o.dpPaidAt || null, balPaidAt: o.balPaidAt || null,
-      },
-      notes: '', ...o,
+      containerLabel: o.col === 'LCL' ? 'LCL' : `1×${o.col}`, col: o.col,
+      billing: { total, dpAmt, balAmt: total - dpAmt, dpPaidAt: o.dpPaidAt || null, balPaidAt: o.balPaidAt || null },
+      notes: '', vessel: '', ...o,
     }
   }
 
   const shipments = [
     SH(31, quotes[10], {
-      col: '40FT', stage: 'delivered', lane: 'green', blNo: 'WHLU2263118', vessel: 'Wan Hai 315 V.088N',
-      eta: daysAgo(38).slice(0, 10), docs: docs(11, 40), dpPaidAt: daysAgo(45), balPaidAt: daysAgo(36),
+      col: '40FT', stage: 'delivered', lane: 'green', carrier: 'Wan Hai', blNo: 'WHLU2263118', vessel: 'Wan Hai 315 V.088N',
+      eta: daysAgo(38).slice(0, 10), docs: docs(15, 40), dpPaidAt: daysAgo(45), balPaidAt: daysAgo(36),
       events: [
         { ts: daysAgo(45), label: 'Booking confirmed · 70% DP received' },
         { ts: daysAgo(39), label: 'SAD lodged via VASP — Entry No. 118-2026-0709912' },
         { ts: daysAgo(38), label: 'Selectivity: GREEN lane' },
         { ts: daysAgo(37), label: 'Duties & taxes paid (PAS6)' },
-        { ts: daysAgo(35), label: 'Delivered to consignee warehouse, Taguig' },
+        { ts: daysAgo(35), label: 'Delivered · container returned, deposit refunded' },
       ],
     }),
     SH(32, quotes[0], {
-      col: '40FT', stage: 'delivered', lane: 'green', blNo: 'COSU6390022', vessel: 'COSCO Shipping Denali V.062E',
-      eta: daysAgo(31).slice(0, 10), docs: docs(11, 33), dpPaidAt: daysAgo(40), balPaidAt: daysAgo(28),
+      col: '40FT', stage: 'delivered', lane: 'green', carrier: 'COSCO', blNo: 'COSU6390022', vessel: 'COSCO Shipping Denali V.062E',
+      eta: daysAgo(31).slice(0, 10), docs: docs(15, 33), dpPaidAt: daysAgo(40), balPaidAt: daysAgo(28),
       events: [
         { ts: daysAgo(40), label: 'Booking confirmed · 70% DP received' },
         { ts: daysAgo(32), label: 'SAD lodged via VASP — Entry No. 118-2026-0713366' },
         { ts: daysAgo(31), label: 'Selectivity: GREEN lane' },
-        { ts: daysAgo(28), label: 'Delivered to consignee warehouse, Pasay' },
+        { ts: daysAgo(28), label: 'Delivered to Marikina · CG released' },
       ],
     }),
     SH(33, quotes[1], {
-      col: '20FT', stage: 'release', lane: 'green', blNo: 'SITU8827741', vessel: 'SITC Nagoya V.2311S',
-      eta: daysAgo(6).slice(0, 10), docs: docs(10, 12), dpPaidAt: daysAgo(26), balPaidAt: daysAgo(1),
+      col: '20FT', stage: 'release', lane: 'green', carrier: 'Wan Hai', blNo: 'WHLU0598378', vessel: 'Wan Hai 271 V.221N',
+      eta: daysAgo(6).slice(0, 10), docs: docs(13, 12), dpPaidAt: daysAgo(26), balPaidAt: daysAgo(1),
       events: [
         { ts: daysAgo(26), label: 'Booking confirmed · 70% DP received' },
         { ts: daysAgo(5), label: 'SAD lodged via VASP — Entry No. 118-2026-0729810' },
@@ -400,8 +454,8 @@ function makeSeed() {
       ],
     }),
     SH(34, quotes[2], {
-      col: '40FT', stage: 'payment', lane: 'yellow', blNo: 'COSU6417755', vessel: 'COSCO Shipping Andes V.071E',
-      eta: daysAgo(3).slice(0, 10), docs: docs(9, 8), dpPaidAt: daysAgo(18),
+      col: '40FT', stage: 'payment', lane: 'yellow', carrier: 'COSCO', blNo: 'COSU6417755', vessel: 'COSCO Shipping Andes V.071E',
+      eta: daysAgo(3).slice(0, 10), docs: docs(11, 8), dpPaidAt: daysAgo(18),
       events: [
         { ts: daysAgo(18), label: 'Booking confirmed · 70% DP received' },
         { ts: daysAgo(2), label: 'SAD lodged via VASP — Entry No. 118-2026-0734402' },
@@ -410,8 +464,8 @@ function makeSeed() {
       ],
     }),
     SH(35, quotes[3], {
-      col: '20FT', stage: 'assessment', lane: 'red', blNo: 'CMDU5108827', vessel: 'CMA CGM Osiris V.104N',
-      eta: daysAgo(2).slice(0, 10), docs: docs(8, 6), dpPaidAt: daysAgo(11),
+      col: '20FT', stage: 'assessment', lane: 'red', carrier: 'CMA CGM', blNo: 'CMDU5108827', vessel: 'CMA CGM Osiris V.104N',
+      eta: daysAgo(2).slice(0, 10), docs: docs(10, 6), dpPaidAt: daysAgo(11),
       events: [
         { ts: daysAgo(11), label: 'Booking confirmed · 70% DP received' },
         { ts: daysAgo(1), label: 'SAD lodged via VASP — Entry No. 118-2026-0736119' },
@@ -420,8 +474,8 @@ function makeSeed() {
       notes: 'FDA import permit attached; examiner appointment Thursday AM, South Harbor CY.',
     }),
     SH(36, quotes[4], {
-      col: '20FT', stage: 'lodged', lane: null, blNo: 'OOLU2648811', vessel: 'OOCL Nagoya V.155S',
-      eta: new Date(Date.now() + 1 * 86400000).toISOString().slice(0, 10), docs: docs(6, 4), dpPaidAt: daysAgo(7),
+      col: '20FT', stage: 'lodged', lane: null, carrier: 'OOCL', blNo: 'OOLU2648811', vessel: 'OOCL Nagoya V.155S',
+      eta: new Date(Date.now() + 1 * 86400000).toISOString().slice(0, 10), docs: docs(8, 4), dpPaidAt: daysAgo(7),
       events: [
         { ts: daysAgo(7), label: 'Booking confirmed · 70% DP received' },
         { ts: daysAgo(0, 11), label: 'SAD lodged via VASP — Entry No. 118-2026-0737254' },
@@ -429,8 +483,54 @@ function makeSeed() {
     }),
   ]
 
+  // -------- consolidation calculator (client's LCL & FCL sheets, verbatim) --------
+  const row = (label, currency, rate, qty, unit, fx, vatable) =>
+    ({ id: uid(), label, currency, rate, qty, unit, fx: fx ?? 1, vatable: !!vatable })
+  const consolidation = {
+    LCL: [
+      { id: uid(), title: 'Origin / Freight', vatOnGroup: false, rows: [
+        row('Ocean Freight', 'USD', 50, 9, 'CBM', fxNow),
+        row('Exworks All-in Origin Charges', 'USD', 0, 9, 'CBM', fxNow),
+      ] },
+      { id: uid(), title: 'Destination', vatOnGroup: true, rows: [
+        row('Documentation', 'PHP', 450, 1, 'SET', 1, true),
+        row('Turnover Fee', 'PHP', 450, 1, 'SET', 1, true),
+        row('LCL Charge', 'PHP', 450, 9, 'CBM', 1, true),
+        row('THC', 'PHP', 250, 9, 'CBM', 1),
+        row('BL Fee', 'USD', 40, 1, 'SET', fxNow),
+        row('PSS', 'USD', 10, 9, 'CBM', fxNow),
+        row('CIC', 'USD', 10, 9, 'CBM', fxNow),
+        row('ECRS', 'USD', 10, 9, 'CBM', fxNow),
+      ] },
+      { id: uid(), title: 'Warehouse Charges', vatOnGroup: true, rows: [
+        row('Documentation', 'PHP', 1474.55, 1, 'SET', 1, true),
+        row('OLRS', 'PHP', 147.46, 1, 'SET', 1, true),
+        row('IMS Fee', 'PHP', 340, 1, 'SET', 1, true),
+        row('Storage', 'PHP', 73.73, 9, 'CBM/DAY ×10', 10, true),
+        row('Arrastre & Wharfage', 'PHP', 552.96, 9, 'CBM', 1, true),
+        row('Stripping & Cargo-out Handling', 'PHP', 1474.55, 9, 'CBM', 1, true),
+        row('Transfer Fee', 'PHP', 737.27, 9, 'CBM', 1, true),
+        row('Incidental Charges', 'PHP', 2000, 9, 'CBM', 1, true),
+        row('Insurance', 'PHP', 1000, 1, 'SET', 1, true),
+        row('Oversize Surcharge', 'PHP', 300, 9, 'CBM', 1, true),
+      ] },
+    ],
+    FCL: [
+      { id: uid(), title: 'Origin', vatOnGroup: false, rows: [
+        row('Exworks Charges', 'USD', 1200, 1, 'CNTR', fxNow),
+        row('Ocean Freight', 'USD', 600, 1, 'CNTR', fxNow),
+      ] },
+      { id: uid(), title: 'Destination', vatOnGroup: false, rows: [
+        row('Documentation', 'PHP', 1500, 1, 'CNTR', 1),
+      ] },
+      { id: uid(), title: 'Shipping Lines', vatOnGroup: false, rows: [
+        row('Shipping Line — as per receipt', 'PHP', 60000, 1, 'SET', 1),
+      ] },
+    ],
+  }
+
   return {
-    version: 3,
+    version: 4,
     settings: defaultSettings,
     fxWeeks,
     tariffLines: tariffSeed.map((t) => ({ id: uid(), ...t })),
@@ -438,6 +538,7 @@ function makeSeed() {
     rateCards: rateCardsSeed,
     quotes,
     shipments,
+    consolidation,
     counters: { quote: 112, shipment: 37 },
   }
 }

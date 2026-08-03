@@ -1,5 +1,4 @@
 import { useDb } from '../lib/store'
-import { peso } from '../lib/format'
 import { Card, CardHead, Button, PageHeader, Field, Input, NumInput, Icon } from '../components/ui'
 
 export default function Settings() {
@@ -15,7 +14,7 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Settings" sub="Company profile + every BOC fee parameter — update as circulars change" />
+      <PageHeader title="Settings" sub="Company profile + every fee constant from the brokerage's Excel tools — update as circulars change" />
       <div className="grid xl:grid-cols-2 gap-5 items-start">
         <div className="space-y-5">
           <Card>
@@ -33,22 +32,34 @@ export default function Settings() {
           </Card>
 
           <Card>
-            <CardHead title="Commercial policy" />
-            <div className="p-5 grid grid-cols-3 gap-3">
+            <CardHead title="Commercial policy" sub={`Inquiry-tool guidance: profit range ₱${(s.profitFloor / 1000).toFixed(0)}K–${(s.profitTarget / 1000).toFixed(0)}K per shipment`} />
+            <div className="p-5 grid grid-cols-2 gap-3">
               <Field label="Quote validity (days)"><NumInput value={s.quoteValidityDays} onChange={(v) => patch('quoteValidityDays', v || 0)} /></Field>
-              <Field label="Margin floor %" hint="Below this → checker approval">
-                <NumInput value={+(s.marginFloor * 100).toFixed(1)} onChange={(v) => patch('marginFloor', (v || 0) / 100)} />
-              </Field>
               <Field label="Downpayment %" hint="Balance due before release">
                 <NumInput value={+(s.dpSplit * 100).toFixed(0)} onChange={(v) => patch('dpSplit', (v || 0) / 100)} />
               </Field>
+              <Field label="Profit floor (₱)" hint="Below this → warning banner">
+                <NumInput value={s.profitFloor} onChange={(v) => patch('profitFloor', v || 0)} />
+              </Field>
+              <Field label="Profit target (₱)">
+                <NumInput value={s.profitTarget} onChange={(v) => patch('profitTarget', v || 0)} />
+              </Field>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHead title="Standard dutiable freight (USD)" sub='From the computation sheet: "LCL-$400 / AIR-$300 / 20FT-$800 / 40FT-$1,200"' />
+            <div className="p-5 grid grid-cols-4 gap-3">
+              {['LCL', 'AIR', '20FT', '40FT'].map((k) => (
+                <Field key={k} label={k}><NumInput value={s.stdFreight[k]} onChange={(v) => patch(`stdFreight.${k}`, v || 0)} /></Field>
+              ))}
             </div>
           </Card>
 
           <Card className="border-red-200">
             <CardHead title="Demo data" />
             <div className="p-5 flex items-center justify-between gap-3">
-              <p className="text-xs text-slate-500">Restore the original seeded dataset (quotes, shipments, tariff lines, FX weeks).</p>
+              <p className="text-xs text-slate-500">Restore the original seeded dataset (quotes, shipments, tariff lines, FX weeks, consolidation).</p>
               <Button tone="danger" icon="trash" onClick={() => { reset(); toast('Demo data reset') }}>Reset demo data</Button>
             </div>
           </Card>
@@ -56,51 +67,34 @@ export default function Settings() {
 
         <div className="space-y-5">
           <Card>
-            <CardHead title="BOC fee parameters" sub="CAO 1-2001 / CAO 2-2001 / CMO lineage — verify against current circulars" />
+            <CardHead title="BOC fee constants" sub="Line-for-line with the brokerage's computation sheets — verify vs current CAO/CMO" />
             <div className="p-5 space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <Field label="VAT rate %"><NumInput value={+(s.vatRate * 100).toFixed(0)} onChange={(v) => patch('vatRate', (v || 0) / 100)} /></Field>
-                <Field label="CDS (₱)"><NumInput value={s.cds} onChange={(v) => patch('cds', v || 0)} /></Field>
-                <Field label="IPF max (₱)"><NumInput value={s.ipfMax} onChange={(v) => patch('ipfMax', v || 0)} /></Field>
+                <Field label="CDS (₱)" hint="Legacy tool ₱265 · quick tool ₱130">
+                  <NumInput value={s.cds} onChange={(v) => patch('cds', v || 0)} />
+                </Field>
+                <Field label="IPF (₱)" hint="Flat std; CAO 2-2001 brackets 250–1,000">
+                  <NumInput value={s.ipf} onChange={(v) => patch('ipf', v || 0)} />
+                </Field>
                 <Field label="Insurance — general %"><NumInput value={+(s.insuranceGeneral * 100).toFixed(1)} onChange={(v) => patch('insuranceGeneral', (v || 0) / 100)} /></Field>
                 <Field label="Insurance — DG %"><NumInput value={+(s.insuranceDG * 100).toFixed(1)} onChange={(v) => patch('insuranceDG', (v || 0) / 100)} /></Field>
               </div>
 
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Brokerage fee schedule (by dutiable value)</p>
-                <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
-                  {s.brokerageBrackets.map((b, i) => (
-                    <div key={i} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                      <span className="text-slate-500 flex-1">DV ≤ {peso(b.upTo, 0)}</span>
-                      <NumInput className="!w-28 !py-1 !text-xs" value={b.fee}
-                        onChange={(v) => update((d) => { d.settings.brokerageBrackets[i].fee = v || 0 })} />
-                    </div>
-                  ))}
-                  <div className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-50">
-                    <span className="text-slate-500 flex-1">Above {peso(s.brokerageExcessOver, 0)}:</span>
-                    <NumInput className="!w-24 !py-1 !text-xs" value={s.brokerageExcessBase} onChange={(v) => patch('brokerageExcessBase', v || 0)} />
-                    <span className="text-slate-400 text-xs">+</span>
-                    <NumInput className="!w-20 !py-1 !text-xs" step="0.0001" value={s.brokerageExcessRate} onChange={(v) => patch('brokerageExcessRate', v || 0)} />
-                    <span className="text-slate-400 text-xs">× excess</span>
-                  </div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Brokerage fee (CAO 1-2001, as applied): DV × rate + base
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Base (₱)"><NumInput value={s.brokerageBase} onChange={(v) => patch('brokerageBase', v || 0)} /></Field>
+                  <Field label="Rate" hint="0.00125 = 0.125%"><NumInput step="0.0001" value={s.brokerageRate} onChange={(v) => patch('brokerageRate', v || 0)} /></Field>
                 </div>
               </div>
 
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Import Processing Fee brackets</p>
-                <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
-                  {s.ipfBrackets.map((b, i) => (
-                    <div key={i} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                      <span className="text-slate-500 flex-1">DV ≤ {peso(b.upTo, 0)}</span>
-                      <NumInput className="!w-28 !py-1 !text-xs" value={b.fee}
-                        onChange={(v) => update((d) => { d.settings.ipfBrackets[i].fee = v || 0 })} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Port charges per container (sample — verify vs PPA/terminal tariff)</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Port charges (sheet cells D35–D38) & CSF
+                </p>
                 <div className="grid grid-cols-3 gap-3">
                   {['20FT', '40FT', 'LCL'].map((c) => (
                     <div key={c} className="rounded-xl border border-slate-200 p-3">
@@ -109,6 +103,11 @@ export default function Settings() {
                       <div className="mt-2">
                         <Field label="Wharfage ₱"><NumInput className="!py-1 !text-xs" value={s.wharfage[c]} onChange={(v) => patch(`wharfage.${c}`, v || 0)} /></Field>
                       </div>
+                      {c !== 'LCL' && (
+                        <div className="mt-2">
+                          <Field label="CSF (USD/cntr)"><NumInput className="!py-1 !text-xs" value={s.csfUsd[c]} onChange={(v) => patch(`csfUsd.${c}`, v || 0)} /></Field>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -116,8 +115,9 @@ export default function Settings() {
 
               <p className="flex items-start gap-1.5 text-[11px] text-slate-400">
                 <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
-                Figures follow CAO 1-2001 (brokerage), CAO 2-2001 (IPF), CMO 30-2019 lineage (CDS ₱280) and PPA
-                schedules. BOC updates these periodically — verify before go-live.
+                Constants imported from "COMPUTATION OF DUTIES & TAXES.xlsx" and the legacy DT Calculator:
+                brokerage = DV × 0.125% + ₱5,050 · arrastre ₱3,727/₱8,551 · wharfage ₱519.35/₱779.05 ·
+                CSF $5/$10 per container. BOC updates these periodically — verify before go-live.
               </p>
             </div>
           </Card>

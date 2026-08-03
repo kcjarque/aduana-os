@@ -9,6 +9,7 @@ import QuoteEditor from './pages/QuoteEditor'
 import QuotePrint from './pages/QuotePrint'
 import Shipments from './pages/Shipments'
 import ShipmentDetail from './pages/ShipmentDetail'
+import Consolidation from './pages/Consolidation'
 import RateCards from './pages/RateCards'
 import Tariff from './pages/Tariff'
 import FxRates from './pages/FxRates'
@@ -20,6 +21,7 @@ const NAV = [
   { to: '/estimator', icon: 'calc', label: 'D&T Estimator' },
   { to: '/quotes', icon: 'file', label: 'Quotations' },
   { to: '/shipments', icon: 'ship', label: 'Shipments' },
+  { to: '/consolidation', icon: 'layers', label: 'Consolidation' },
   { to: '/rates', icon: 'tags', label: 'Rate Cards' },
   { to: '/tariff', icon: 'book', label: 'Tariff Library' },
   { to: '/fx', icon: 'fx', label: 'FX Rates' },
@@ -116,6 +118,7 @@ function Routed() {
         <Route path="/quotes/:id" element={<QuoteEditor />} />
         <Route path="/shipments" element={<Shipments />} />
         <Route path="/shipments/:id" element={<ShipmentDetail />} />
+        <Route path="/consolidation" element={<Consolidation />} />
         <Route path="/rates" element={<RateCards />} />
         <Route path="/tariff" element={<Tariff />} />
         <Route path="/fx" element={<FxRates />} />

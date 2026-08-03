@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useDb, clientById, quoteById } from '../lib/store'
-import { computeDT, quoteTotals, bocLineAmount } from '../lib/compute'
-import { peso, fmtDate } from '../lib/format'
+import { computeDT, quoteTotals, dtInputsForCol } from '../lib/compute'
+import { peso, num, fmtDate } from '../lib/format'
 import { Button, Icon } from '../components/ui'
 import SignaturePad from '../components/SignaturePad'
 
@@ -13,7 +13,7 @@ export default function QuotePrint() {
   const [signing, setSigning] = useState(false)
 
   const dtByCol = useMemo(
-    () => quote ? Object.fromEntries(quote.columns.map((c) => [c, computeDT(quote.dtInputs, c, db.settings)])) : {},
+    () => quote ? Object.fromEntries(quote.columns.map((c) => [c, computeDT(dtInputsForCol(quote.dtInputs, c), db.settings)])) : {},
     [quote, db.settings],
   )
   if (!quote) return <div className="p-10 text-center text-slate-500">Quotation not found. <Link className="text-navy-700 underline" to="/quotes">Back</Link></div>
@@ -22,6 +22,7 @@ export default function QuotePrint() {
   const client = clientById(db, quote.clientId)
   const totals = quoteTotals(quote, dtByCol)
   const allIn = quote.presentation === 'allin'
+  const di = quote.dtInputs
 
   const saveSignature = (dataUrl) => {
     update((d) => {
@@ -76,30 +77,32 @@ export default function QuotePrint() {
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Quoted to</p>
             <p className="font-semibold text-slate-900">{client?.name || '—'}</p>
             <p className="text-xs text-slate-500">{client?.address}</p>
-            <p className="text-xs text-slate-500">Attn: {client?.contact} · TIN {client?.tin}</p>
+            <p className="text-xs text-slate-500">Attn: {client?.contact} · {client?.phone}</p>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <span className="text-slate-400">Route</span><span className="text-slate-800 font-medium">{quote.origin || '—'} → {quote.dest}</span>
-            <span className="text-slate-400">Commodity</span><span className="text-slate-800 font-medium">{quote.commodity || '—'}</span>
-            <span className="text-slate-400">AHTN code</span><span className="tnum text-slate-800 font-medium">{quote.dtInputs.ahtnCode || '—'} ({(quote.dtInputs.basis || 'mfn').toUpperCase()} {(Number(quote.dtInputs.dutyRate || 0) * 100).toFixed(1)}%)</span>
-            <span className="text-slate-400">Incoterm / FX</span>
-            <span className="tnum text-slate-800 font-medium">{quote.dtInputs.incoterm} · {quote.dtInputs.currency} @ ₱{Number(quote.dtInputs.fxRate).toFixed(2)}</span>
+            <span className="text-slate-400">Origin</span><span className="text-slate-800 font-medium">{quote.originCountry || '—'} · {quote.pol || quote.origin || '—'}</span>
+            <span className="text-slate-400">Destination</span><span className="text-slate-800 font-medium">{quote.pod || quote.dest} → {quote.deliveryAddr || '—'}</span>
+            <span className="text-slate-400">Commodity</span><span className="text-slate-800 font-medium">{quote.commodity || '—'} ({quote.columns.join(' / ')})</span>
+            <span className="text-slate-400">GW / Volume</span><span className="tnum text-slate-800 font-medium">{num(quote.grossWeight || 0, 0)} kgs · {num(quote.volume || 0, 1)} CBM</span>
+            <span className="text-slate-400">H.S. code</span><span className="tnum text-slate-800 font-medium">{di.ahtnCode || '—'} ({(di.basis || 'mfn').toUpperCase()} {(Number(di.dutyRate || 0) * 100).toFixed(1)}%)</span>
+            <span className="text-slate-400">Incoterms / E.R.</span>
+            <span className="tnum text-slate-800 font-medium">{di.incoterm} · {di.currency} @ ₱{Number(di.fxRate).toFixed(3)}</span>
           </div>
         </div>
 
         {/* charges */}
         {allIn ? (
           <div className="border-2 border-navy-900 rounded-xl overflow-hidden">
-            <div className="bg-navy-900 text-white px-4 py-2 text-xs font-bold uppercase tracking-widest">All-in clearance & forwarding package</div>
-            <div className="grid" style={{ gridTemplateColumns: `1fr ${quote.columns.map(() => '160px').join(' ')}` }}>
-              <div className="px-4 py-3 text-sm text-slate-600">
-                Complete import clearance: duties & taxes advance, brokerage, port charges, freight,
-                documentation, lodgement and delivery — one all-in price.
+            <div className="bg-navy-900 text-white px-4 py-2 text-xs font-bold uppercase tracking-widest">All-in door-to-door package — Final Quotation</div>
+            <div className="grid" style={{ gridTemplateColumns: `1fr ${quote.columns.map(() => '170px').join(' ')}` }}>
+              <div className="px-4 py-3 text-[11px] text-slate-600 leading-relaxed">
+                Inclusive of: {quote.lines.filter((l) => !l.refundable).map((l) => l.label).join(', ')}.
+                Container deposit billed separately and refunded upon clean empty return.
               </div>
               {quote.columns.map((c) => (
                 <div key={c} className="px-4 py-3 border-l border-slate-200 text-right">
                   <p className="text-[10px] font-bold uppercase text-slate-400">{c}</p>
-                  <p className="tnum text-xl font-bold text-navy-900">{peso(totals[c].sell)}</p>
+                  <p className="tnum text-xl font-bold text-navy-900">{peso(totals[c].finalQuote, 0)}</p>
                 </div>
               ))}
             </div>
@@ -110,44 +113,89 @@ export default function QuotePrint() {
               <tr className="border-y-2 border-navy-900 text-[10px] uppercase tracking-widest text-slate-500">
                 <th className="text-left py-2 pr-2 font-bold">#</th>
                 <th className="text-left py-2 font-bold">Description</th>
-                {quote.columns.map((c) => <th key={c} className="text-right py-2 font-bold w-36">{c} (₱)</th>)}
+                {quote.columns.map((c) => <th key={c} className="text-right py-2 font-bold w-32">{c} (₱)</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {quote.lines.map((ln, i) => (
-                <tr key={ln.id}>
+                <tr key={ln.key}>
                   <td className="py-1.5 pr-2 text-slate-400 tnum">{i + 1}</td>
                   <td className="py-1.5 text-slate-700">
                     {ln.label}
-                    {ln.kind === 'boc' && <span className="text-[10px] text-slate-400 ml-1.5">(per BOC computation)</span>}
+                    {ln.locked && <span className="text-[10px] text-slate-400 ml-1.5">(per BOC computation below)</span>}
+                    {ln.refundable && <span className="text-[10px] text-slate-400 ml-1.5">(refundable)</span>}
                   </td>
                   {quote.columns.map((c) => (
                     <td key={c} className="py-1.5 text-right tnum text-slate-800">
-                      {peso(ln.kind === 'boc' ? bocLineAmount(ln.bocKey, dtByCol[c]) : (ln.values[c]?.sell || 0))}
+                      {peso(ln.locked ? (dtByCol[c]?.totalBoc ?? 0) : (ln.values?.[c] || 0), 0)}
                     </td>
                   ))}
                 </tr>
               ))}
+              <tr>
+                <td className="py-1.5 pr-2 text-slate-400 tnum">{quote.lines.length + 1}</td>
+                <td className="py-1.5 text-slate-700">Professional & Service Fee</td>
+                {quote.columns.map((c) => (
+                  <td key={c} className="py-1.5 text-right tnum text-slate-800">{peso(Math.max(0, totals[c].gross), 0)}</td>
+                ))}
+              </tr>
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-navy-900">
-                <td colSpan={2} className="py-2.5 font-bold text-navy-900">TOTAL</td>
+                <td colSpan={2} className="py-2.5 font-bold text-navy-900">FINAL QUOTATION</td>
                 {quote.columns.map((c) => (
-                  <td key={c} className="py-2.5 text-right tnum font-bold text-base text-navy-900">{peso(totals[c].sell)}</td>
+                  <td key={c} className="py-2.5 text-right tnum font-bold text-base text-navy-900">{peso(totals[c].finalQuote, 0)}</td>
                 ))}
               </tr>
             </tfoot>
           </table>
         )}
 
+        {/* advance computation of duties & taxes — mirrors the Client's Confirmation Copy */}
+        <div className="mt-6 border border-slate-300 rounded-xl overflow-hidden">
+          <div className="bg-slate-100 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">
+            Advance computation of duties and taxes — amount payable to the Bureau of Customs
+          </div>
+          <div className={`grid ${quote.columns.length > 1 ? 'grid-cols-2 divide-x' : 'grid-cols-1'} divide-slate-200`}>
+            {quote.columns.map((c) => {
+              const dt = dtByCol[c]
+              const L = ({ label, v, strong, indent }) => (
+                <div className={`flex justify-between py-0.5 ${indent ? 'pl-4' : ''}`}>
+                  <span className={`${strong ? 'font-bold text-slate-800' : 'text-slate-500'} text-[11px]`}>{label}</span>
+                  <span className={`tnum text-[11px] ${strong ? 'font-bold text-navy-900' : 'text-slate-700'}`}>{v}</span>
+                </div>
+              )
+              return (
+                <div key={c} className="px-4 py-3">
+                  {quote.columns.length > 1 && <p className="text-[10px] font-bold text-navy-700 mb-1">{c}</p>}
+                  <L label="1 · CUSTOMS DUTY" v={peso(dt.duty)} strong />
+                  <L indent label={`Dutiable value (${num(dt.dutiableFx)} ${di.currency} × ₱${num(dt.fx, 3)})`} v={peso(dt.dv)} />
+                  <L indent label={`Rate of duty (${(di.basis || 'mfn').toUpperCase()})`} v={`${(Number(di.dutyRate || 0) * 100).toFixed(2)}%`} />
+                  <L label="2 · VALUE ADDED TAX" v={peso(dt.vat)} strong />
+                  <L indent label="Brokerage fee (CAO 1-2001)" v={peso(dt.brokerage)} />
+                  <L indent label="Wharfage / Arrastre" v={peso(dt.wharfage + dt.arrastre)} />
+                  <L indent label={`CDS / IPF${dt.bank ? ' / Bank' : ''}`} v={peso(dt.cds + dt.ipf + dt.bank)} />
+                  <L indent label="Landed cost × 12%" v={peso(dt.landedCost)} />
+                  <L label="3 · IMPORT PROCESSING FEE" v={peso(dt.ipf)} strong />
+                  <L label="4 · EXCISE TAX" v={peso(dt.excise)} strong />
+                  <L label="5 · CSF" v={peso(dt.csf)} strong />
+                  <div className="border-t border-slate-300 mt-1.5 pt-1.5">
+                    <L label="TOTAL AMOUNT PAYABLE" v={peso(dt.totalBoc)} strong />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
         {/* terms */}
         <div className="mt-6 grid grid-cols-2 gap-6">
           <div className="text-[11px] text-slate-500 leading-relaxed">
             <p className="font-bold text-slate-700 uppercase tracking-wide text-[10px] mb-1">Terms & conditions</p>
             <p>1. Payment: <span className="font-semibold text-slate-700">{(s.dpSplit * 100).toFixed(0)}% downpayment upon signed acceptance; {(100 - s.dpSplit * 100).toFixed(0)}% balance before release of cargo.</span></p>
-            <p>2. Duties, taxes and port charges are advanced on the importer's behalf and billed at actual BOC assessment; figures above are estimates at the current weekly BOC rate of exchange.</p>
-            <p>3. Excludes demurrage/detention/storage beyond free time, examination charges on RED-lane selectivity, and permits/ATRIG unless itemized.</p>
-            <p>4. Quotation valid until {fmtDate(quote.validUntil)}; subject to carrier GRI and BOC exchange-rate movement.</p>
+            <p>2. Computation is subject to change upon evaluation of the Bureau of Customs; duties & taxes are advanced on the importer's behalf and billed at actual assessment.</p>
+            <p>3. Container deposit is refunded upon clean return of the empty container. Excludes demurrage/detention/storage beyond free time and examination charges on RED-lane selectivity.</p>
+            <p>4. Quotation valid until {fmtDate(quote.validUntil)}; subject to carrier GRI and exchange-rate movement.</p>
           </div>
           <div>
             <div className="grid grid-cols-2 gap-4">
@@ -155,7 +203,7 @@ export default function QuotePrint() {
                 <div className="h-16 flex items-end">
                   <p className="font-display text-sm font-semibold text-slate-800 italic">{s.company.rep}</p>
                 </div>
-                <div className="border-t border-slate-400 pt-1 text-[10px] text-slate-500 uppercase tracking-wide">Prepared by · {s.company.name.split(' ')[0]}</div>
+                <div className="border-t border-slate-400 pt-1 text-[10px] text-slate-500 uppercase tracking-wide">Prepared by</div>
               </div>
               <div>
                 <div className="h-16 flex items-end justify-center">
@@ -166,7 +214,7 @@ export default function QuotePrint() {
                       : null}
                 </div>
                 <div className="border-t border-slate-400 pt-1 text-[10px] text-slate-500 uppercase tracking-wide">
-                  Conforme · {client?.name?.slice(0, 26)}{quote.approvedAt ? ` · ${fmtDate(quote.approvedAt)}` : ''}
+                  Conforme · signature over printed name{quote.approvedAt ? ` · ${fmtDate(quote.approvedAt)}` : ''}
                 </div>
               </div>
             </div>

@@ -45,9 +45,10 @@ export default function Tariff() {
       <div className="mb-4 flex items-start gap-2 rounded-xl border border-navy-100 bg-navy-50 px-4 py-3 text-xs text-navy-800">
         <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
         <span>
-          Seeded <b>sample schedule ({db.tariffLines.length} lines)</b> for demo purposes. Production dataset: request the
-          public-domain AHTN 2022 schedule from the <b>Tariff Commission</b> (TC.Assist@mail.tariffcommission.gov.ph) and
-          import here; cross-check via WITS. Rates change by Executive Order — keep the 2024–2028 staging updated.
+          Seeded from the brokerage's own <b>"Frequently Used Tariff Headings" list ({db.tariffLines.length} lines)</b> —
+          T.R. as MFN; preferential columns default to <b>0% (Form-E/D practice)</b> and must be verified per line.
+          Full dataset: request the public-domain AHTN 2022 schedule from the <b>Tariff Commission</b>{' '}
+          (TC.Assist@mail.tariffcommission.gov.ph); rates change by Executive Order.
         </span>
       </div>
 

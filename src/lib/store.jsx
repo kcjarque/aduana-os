@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import makeSeed from './seed'
 
 const KEY = 'aduana-db'
-const SEED_VERSION = 3
+const SEED_VERSION = 4
 
 function load() {
   try {

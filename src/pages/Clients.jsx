@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useDb } from '../lib/store'
 import { peso, uid } from '../lib/format'
-import { computeDT, quoteTotals } from '../lib/compute'
 import { Card, Button, PageHeader, Badge, Modal, Field, Input, QuoteStatusBadge } from '../components/ui'
 
 const empty = { name: '', tin: '', address: '', contact: '', email: '', phone: '' }
@@ -32,9 +31,8 @@ export default function Clients() {
           const quotes = db.quotes.filter((q) => q.clientId === c.id)
           const booked = quotes.filter((q) => q.status === 'booked')
           const revenue = booked.reduce((sum, q) => {
-            const dtByCol = Object.fromEntries(q.columns.map((cc) => [cc, computeDT(q.dtInputs, cc, db.settings)]))
             const col = q.chosenCol || q.columns[0]
-            return sum + quoteTotals(q, dtByCol)[col].sell
+            return sum + (Number(q.finalQuote?.[col]) || 0)
           }, 0)
           return (
             <Card key={c.id} className="p-5">

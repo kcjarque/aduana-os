@@ -1,20 +1,21 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useDb, clientById, quoteById, nextNo } from '../lib/store'
-import { computeDT, quoteTotals, bocLineAmount } from '../lib/compute'
-import { DOC_KEYS } from '../lib/seed'
+import { computeDT, quoteTotals, dtInputsForCol } from '../lib/compute'
+import { DOC_KEYS, chargeTemplate } from '../lib/seed'
 import { peso, fmtDate, uid } from '../lib/format'
 import {
   Card, CardHead, Button, PageHeader, Field, Input, NumInput, Select, Toggle,
-  QuoteStatusBadge, MarginChip, Badge, Icon, Modal, EmptyState,
+  QuoteStatusBadge, IncomeChip, Badge, Icon, Modal, EmptyState,
 } from '../components/ui'
 import { DtForm, DtDisclaimer } from '../components/dt'
 
 const COLS_OPTS = [
-  { id: '20FT', label: '20FT only' },
-  { id: '40FT', label: '40FT only' },
-  { id: 'LCL', label: 'LCL' },
-  { id: 'BOTH', label: '20FT vs 40FT comparison' },
+  { id: '20FT', label: 'FCL — 20FT only' },
+  { id: '40FT', label: 'FCL — 40FT only' },
+  { id: 'BOTH', label: 'FCL — 20FT vs 40FT comparison' },
+  { id: 'LCL', label: 'LCL (consolidation)' },
+  { id: 'AIR', label: 'Via Air' },
 ]
 
 export default function QuoteEditor() {
@@ -35,44 +36,49 @@ export default function QuoteEditor() {
   const patchDt = (p) => update((d) => { Object.assign(d.quotes.find((x) => x.id === id).dtInputs, p) })
 
   const dtByCol = useMemo(
-    () => Object.fromEntries(quote.columns.map((c) => [c, computeDT(quote.dtInputs, c, s)])),
+    () => Object.fromEntries(quote.columns.map((c) => [c, computeDT(dtInputsForCol(quote.dtInputs, c), s)])),
     [quote.dtInputs, quote.columns, s],
   )
   const totals = useMemo(() => quoteTotals(quote, dtByCol), [quote, dtByCol])
-  const primary = quote.columns[0]
-  const belowFloor = quote.columns.some((c) => totals[c].marginPct < s.marginFloor)
+  const belowFloor = quote.columns.some((c) => totals[c].net < s.profitFloor)
 
   const setColumns = (mode) => {
     update((d) => {
       const qq = d.quotes.find((x) => x.id === id)
       const cols = mode === 'BOTH' ? ['20FT', '40FT'] : [mode]
       qq.columns = cols
+      qq.dtInputs.mode = mode === 'LCL' ? 'LCL' : mode === 'AIR' ? 'AIR' : 'FCL'
       qq.lines.forEach((ln) => {
-        if (ln.kind !== 'service') return
+        if (ln.locked) return
         const prev = ln.values || {}
-        const fallback = prev[Object.keys(prev)[0]] || { buy: 0, sell: 0 }
-        ln.values = Object.fromEntries(cols.map((c) => [c, prev[c] ? { ...prev[c] } : { ...fallback }]))
+        const tpl = chargeTemplate.find((t) => t.key === ln.key)
+        ln.values = Object.fromEntries(cols.map((c) => [c,
+          prev[c] ?? (c === '40FT' ? (tpl?.d40 ?? 0) : (tpl?.d20 ?? 0)),
+        ]))
       })
+      qq.finalQuote = Object.fromEntries(cols.map((c) => [c, qq.finalQuote?.[c] ?? 0]))
       if (qq.chosenCol && !cols.includes(qq.chosenCol)) qq.chosenCol = null
     })
   }
 
-  const setLineVal = (lineId, col, field, v) => update((d) => {
-    const ln = d.quotes.find((x) => x.id === id).lines.find((l) => l.id === lineId)
-    ln.values[col][field] = v === '' ? 0 : v
+  const setLineVal = (key, col, v) => update((d) => {
+    const ln = d.quotes.find((x) => x.id === id).lines.find((l) => l.key === key)
+    ln.values[col] = v === '' ? 0 : v
+  })
+  const setFinal = (col, v) => update((d) => {
+    d.quotes.find((x) => x.id === id).finalQuote[col] = v === '' ? 0 : v
   })
 
   const addLine = () => update((d) => {
     const qq = d.quotes.find((x) => x.id === id)
     qq.lines.push({
-      id: uid(), label: 'Custom charge', kind: 'service',
-      values: Object.fromEntries(qq.columns.map((c) => [c, { buy: 0, sell: 0 }])),
+      key: uid(), label: 'Custom charge', remark: '', locked: false, refundable: false,
+      values: Object.fromEntries(qq.columns.map((c) => [c, 0])),
     })
   })
-
-  const removeLine = (lineId) => update((d) => {
+  const removeLine = (key) => update((d) => {
     const qq = d.quotes.find((x) => x.id === id)
-    qq.lines = qq.lines.filter((l) => l.id !== lineId)
+    qq.lines = qq.lines.filter((l) => l.key !== key)
   })
 
   const markSent = () => { patchQ({ status: 'sent', sentAt: new Date().toISOString() }); toast('Quotation marked as sent') }
@@ -89,13 +95,12 @@ export default function QuoteEditor() {
       const qq = d.quotes.find((x) => x.id === id)
       qq.status = 'booked'
       qq.chosenCol = col
-      const total = totals[col].sell
+      const total = Number(qq.finalQuote[col]) || 0
       const dpAmt = Math.round(total * d.settings.dpSplit)
       d.shipments.unshift({
         id: shId, refNo: nextNo(d, 'shipment'), quoteId: qq.id, clientId: qq.clientId,
-        containerLabel: `${Math.max(1, Number(qq.dtInputs.qty) || 1)}×${col}`, col,
-        stage: 'booked', lane: null, blNo: '', vessel: '',
-        eta: '', notes: '',
+        containerLabel: col === 'LCL' ? 'LCL' : col === 'AIR' ? 'AIR' : `1×${col}`, col,
+        stage: 'booked', lane: null, carrier: '', blNo: '', vessel: '', eta: '', notes: '',
         docs: Object.fromEntries(DOC_KEYS.map((k) => [k, { done: false, date: null }])),
         billing: { total, dpAmt, balAmt: total - dpAmt, dpPaidAt: null, balPaidAt: null },
         events: [{ ts: new Date().toISOString(), label: `Booking confirmed from ${qq.no} (${col})` }],
@@ -111,18 +116,18 @@ export default function QuoteEditor() {
     update((d) => {
       const qq = d.quotes.find((x) => x.id === id)
       const fx = qq.dtInputs.fxRate || 0
-      const ln = qq.lines.find((l) => l.id === 'freight')
+      const ln = qq.lines.find((l) => l.key === 'freight')
       if (!ln) return
       for (const c of qq.columns) {
-        if (r.container === c || qq.columns.length === 1) {
-          ln.values[c] = { buy: Math.round(r.buyUsd * fx), sell: Math.round(r.sellUsd * fx) }
-        }
+        if (r.container === c || qq.columns.length === 1) ln.values[c] = Math.round(r.sellUsd * fx)
       }
       if (!qq.origin) qq.origin = r.origin
     })
     setRateOpen(false)
-    toast(`Freight filled from ${r.carrier} rate card @ BOC rate`)
+    toast(`Freight filled from ${r.carrier} rate card @ E.R.`)
   }
+
+  const client = clientById(db, quote.clientId)
 
   return (
     <div>
@@ -136,7 +141,7 @@ export default function QuoteEditor() {
           {quote.status === 'draft' && <Button size="sm" icon="arrow" onClick={markSent}>Mark sent</Button>}
           {quote.status === 'sent' && <Button tone="danger" size="sm" onClick={markLost}>Mark lost</Button>}
           {quote.status === 'approved' && <Button tone="gold" size="sm" icon="ship" onClick={() => setConvertOpen(true)}>Convert to shipment</Button>}
-          {quote.status === 'booked' && quote.chosenCol && (
+          {quote.status === 'booked' && (
             <Link to={`/shipments/${db.shipments.find((sh) => sh.quoteId === quote.id)?.id || ''}`}>
               <Button tone="gold" size="sm" icon="ship">Open shipment</Button>
             </Link>
@@ -147,31 +152,28 @@ export default function QuoteEditor() {
       {belowFloor && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
           <Icon name="alert" size={16} />
-          Margin below the {`${(s.marginFloor * 100).toFixed(0)}%`} floor — requires checker approval before sending (maker–checker policy).
+          Net income below the ₱{(s.profitFloor / 1000).toFixed(0)}K floor (target range ₱{(s.profitFloor / 1000).toFixed(0)}K–{(s.profitTarget / 1000).toFixed(0)}K) — raise the final quotation or trim expenses before sending.
         </div>
       )}
 
       <div className="grid xl:grid-cols-3 gap-5 items-start">
-        {/* left: header + charges */}
         <div className="xl:col-span-2 space-y-5">
+          {/* inquiry header — mirrors INQUIRY TOOL */}
           <Card>
-            <CardHead title="Shipment header" />
+            <CardHead title="Inquiry & shipment details" sub={client ? `${client.contact || ''} · ${client.phone || ''} · ${client.email || ''}` : ''} />
             <div className="p-5 grid sm:grid-cols-2 gap-3">
               <Field label="Client">
                 <Select value={quote.clientId || ''} disabled={!editable} onChange={(e) => patchQ({ clientId: e.target.value })}>
                   {db.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
               </Field>
-              <Field label="Commodity summary">
-                <Input value={quote.commodity} disabled={!editable} onChange={(e) => patchQ({ commodity: e.target.value })} placeholder="e.g. LED televisions — 640 units" />
+              <Field label="Commodity">
+                <Input value={quote.commodity} disabled={!editable} onChange={(e) => patchQ({ commodity: e.target.value })} placeholder="e.g. Commercial refrigerator" />
               </Field>
-              <Field label="Origin">
-                <Input value={quote.origin} disabled={!editable} onChange={(e) => patchQ({ origin: e.target.value })} placeholder="Port, country" />
+              <Field label="Country of origin">
+                <Input value={quote.originCountry || ''} disabled={!editable} onChange={(e) => patchQ({ originCountry: e.target.value })} />
               </Field>
-              <Field label="Destination">
-                <Input value={quote.dest} disabled={!editable} onChange={(e) => patchQ({ dest: e.target.value })} />
-              </Field>
-              <Field label="Container option">
+              <Field label="Shipment option">
                 <Select
                   value={quote.columns.length === 2 ? 'BOTH' : quote.columns[0]}
                   disabled={!editable}
@@ -180,65 +182,75 @@ export default function QuoteEditor() {
                   {COLS_OPTS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </Select>
               </Field>
+              {quote.dtInputs.incoterm === 'EXWORKS' && (
+                <Field label="Pickup address (EXW)" className="sm:col-span-2">
+                  <Input value={quote.pickupAddr || ''} disabled={!editable} onChange={(e) => patchQ({ pickupAddr: e.target.value })} />
+                </Field>
+              )}
+              <Field label="Port of loading">
+                <Input value={quote.pol || quote.origin || ''} disabled={!editable} onChange={(e) => patchQ({ pol: e.target.value, origin: e.target.value })} />
+              </Field>
+              <Field label="Port of destination">
+                <Input value={quote.pod || quote.dest || ''} disabled={!editable} onChange={(e) => patchQ({ pod: e.target.value, dest: e.target.value })} />
+              </Field>
+              <Field label="Gross weight (kgs)">
+                <NumInput value={quote.grossWeight || 0} disabled={!editable} onChange={(v) => patchQ({ grossWeight: v })} />
+              </Field>
+              <Field label="Total volume (CBM)">
+                <NumInput value={quote.volume || 0} disabled={!editable} onChange={(v) => patchQ({ volume: v })} />
+              </Field>
+              <Field label="Delivery address">
+                <Input value={quote.deliveryAddr || ''} disabled={!editable} onChange={(e) => patchQ({ deliveryAddr: e.target.value })} />
+              </Field>
               <Field label="Valid until">
                 <Input type="date" value={quote.validUntil || ''} disabled={!editable} onChange={(e) => patchQ({ validUntil: e.target.value })} />
               </Field>
             </div>
           </Card>
 
+          {/* computations — the client's 16 lines */}
           <Card>
             <CardHead
-              title="Charges — standard 16-line template"
-              sub="BOC lines auto-computed from the D&T engine (locked); service lines carry your buy/sell margin"
+              title="Computations — inquiry tool expense lines"
+              sub="The brokerage's standard 16 lines; Duties & Taxes auto-computed from the BOC engine"
               right={<Toggle checked={quote.presentation === 'allin'} onChange={(v) => patchQ({ presentation: v ? 'allin' : 'itemized' })} label="All-in presentation" />}
             />
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
+              <table className="w-full text-sm min-w-[620px]">
                 <thead>
                   <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-100">
-                    <th className="px-5 py-2.5 font-semibold">Line item</th>
-                    {quote.columns.map((c) => (
-                      <th key={c} className="px-3 py-2.5 font-semibold text-right" colSpan={2}>
-                        <span className="text-navy-700">{c}</span>
-                        <span className="block normal-case font-normal text-[10px] text-slate-400">buy · sell (₱)</span>
-                      </th>
-                    ))}
-                    <th className="w-10" />
+                    <th className="px-5 py-2.5 font-semibold">Expense line</th>
+                    {quote.columns.map((c) => <th key={c} className="px-3 py-2.5 font-semibold text-right w-36 text-navy-700">{c} (₱)</th>)}
+                    <th className="px-3 py-2.5 font-semibold w-56">Remarks</th>
+                    <th className="w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {quote.lines.map((ln) => (
-                    <tr key={ln.id} className="group">
+                    <tr key={ln.key} className="group">
                       <td className="px-5 py-2">
-                        {ln.kind === 'boc' ? (
+                        {ln.locked ? (
                           <span className="flex items-center gap-1.5 text-slate-700">
                             <Icon name="lock" size={13} className="text-slate-300" />{ln.label}
                           </span>
-                        ) : editable ? (
-                          <input
-                            className="w-full bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 text-slate-800"
-                            value={ln.label}
-                            onChange={(e) => update((d) => { d.quotes.find((x) => x.id === id).lines.find((l) => l.id === ln.id).label = e.target.value })}
-                          />
-                        ) : <span className="text-slate-800">{ln.label}</span>}
+                        ) : (
+                          <span className="text-slate-800">{ln.label}{ln.refundable && <Badge tone="gold" className="ml-2">refundable</Badge>}</span>
+                        )}
                       </td>
-                      {quote.columns.map((c) => ln.kind === 'boc' ? (
-                        <td key={c} colSpan={2} className="px-3 py-2 text-right tnum text-slate-600">
-                          <span className="text-slate-300 mr-3">·</span>{peso(bocLineAmount(ln.bocKey, dtByCol[c]))}
+                      {quote.columns.map((c) => ln.locked ? (
+                        <td key={c} className="px-3 py-2 text-right tnum font-semibold text-navy-800">
+                          {peso(dtByCol[c]?.totalBoc ?? 0, 0)}
                         </td>
                       ) : (
-                        <td key={c} colSpan={2} className="px-3 py-1.5">
-                          <div className="flex gap-1.5 justify-end">
-                            <NumInput className="!w-24 !px-2 !py-1 !text-xs !rounded-lg" value={ln.values[c]?.buy ?? 0}
-                              disabled={!editable} onChange={(v) => setLineVal(ln.id, c, 'buy', v)} />
-                            <NumInput className="!w-24 !px-2 !py-1 !text-xs !rounded-lg !border-navy-600/40 !bg-navy-50/40" value={ln.values[c]?.sell ?? 0}
-                              disabled={!editable} onChange={(v) => setLineVal(ln.id, c, 'sell', v)} />
-                          </div>
+                        <td key={c} className="px-3 py-1.5">
+                          <NumInput className="!w-full !px-2 !py-1 !text-xs !rounded-lg" value={ln.values?.[c] ?? 0}
+                            disabled={!editable} onChange={(v) => setLineVal(ln.key, c, v)} />
                         </td>
                       ))}
+                      <td className="px-3 py-2 text-[11px] text-slate-400">{ln.remark}</td>
                       <td className="pr-3">
-                        {ln.kind === 'service' && editable && (
-                          <button onClick={() => removeLine(ln.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500">
+                        {!ln.locked && !chargeTemplate.find((t) => t.key === ln.key) && editable && (
+                          <button onClick={() => removeLine(ln.key)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500">
                             <Icon name="trash" size={14} />
                           </button>
                         )}
@@ -248,27 +260,45 @@ export default function QuoteEditor() {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-slate-200 bg-slate-50/60">
-                    <td className="px-5 py-3 font-semibold text-slate-900">Total quotation</td>
+                    <td className="px-5 py-3 font-semibold text-slate-900">TOTAL EXPENSES</td>
                     {quote.columns.map((c) => (
-                      <td key={c} colSpan={2} className="px-3 py-3 text-right">
-                        <span className="tnum font-bold text-base text-navy-800">{peso(totals[c].sell)}</span>
-                        <span className="block text-[11px] text-slate-500 tnum">cost {peso(totals[c].buy, 0)}</span>
-                      </td>
+                      <td key={c} className="px-3 py-3 text-right tnum font-bold text-slate-800">{peso(totals[c].expenses, 0)}</td>
                     ))}
-                    <td />
+                    <td colSpan={2} />
                   </tr>
                   <tr className="bg-gold-50/70">
-                    <td className="px-5 py-2.5 font-semibold text-gold-600 text-xs uppercase tracking-wide">
-                      Gross margin
-                      <span className="block normal-case font-normal text-[10px] text-gold-600/70">% on service revenue (excl. pass-through advances)</span>
-                    </td>
+                    <td className="px-5 py-3 font-bold text-gold-600 uppercase text-xs tracking-wide">Final Quotation</td>
                     {quote.columns.map((c) => (
-                      <td key={c} colSpan={2} className="px-3 py-2.5 text-right">
-                        <span className="tnum font-bold text-gold-600">{peso(totals[c].margin)}</span>
-                        <span className="ml-2"><MarginChip pctVal={totals[c].marginPct} floor={s.marginFloor} /></span>
+                      <td key={c} className="px-3 py-2">
+                        <NumInput className="!w-full !px-2 !py-1.5 !text-sm !font-bold !rounded-lg !border-gold-500/60 !bg-white" value={quote.finalQuote?.[c] ?? 0}
+                          disabled={!editable} onChange={(v) => setFinal(c, v)} />
                       </td>
                     ))}
-                    <td />
+                    <td colSpan={2} className="px-3 text-[11px] text-gold-600">Profit range guide: ₱{(s.profitFloor / 1000).toFixed(0)}K–{(s.profitTarget / 1000).toFixed(0)}K</td>
+                  </tr>
+                  <tr>
+                    <td className="px-5 py-2 text-xs font-semibold text-slate-500">GROSS INCOME</td>
+                    {quote.columns.map((c) => (
+                      <td key={c} className="px-3 py-2 text-right tnum font-semibold text-slate-700">{peso(totals[c].gross, 0)}</td>
+                    ))}
+                    <td colSpan={2} />
+                  </tr>
+                  <tr>
+                    <td className="px-5 py-2 text-xs font-semibold text-slate-500">CNTR. DEPOSIT REFUND</td>
+                    {quote.columns.map((c) => (
+                      <td key={c} className="px-3 py-2 text-right tnum text-slate-600">{peso(totals[c].refund, 0)}</td>
+                    ))}
+                    <td colSpan={2} className="px-3 text-[11px] text-slate-400">Returned when empty container is returned clean</td>
+                  </tr>
+                  <tr className="border-t border-slate-200 bg-navy-50/50">
+                    <td className="px-5 py-3 font-bold text-navy-900">NET INCOME</td>
+                    {quote.columns.map((c) => (
+                      <td key={c} className="px-3 py-3 text-right">
+                        <span className="tnum font-bold text-navy-900 mr-2">{peso(totals[c].net, 0)}</span>
+                        <IncomeChip net={totals[c].net} floor={s.profitFloor} target={s.profitTarget} />
+                      </td>
+                    ))}
+                    <td colSpan={2} />
                   </tr>
                 </tfoot>
               </table>
@@ -281,10 +311,10 @@ export default function QuoteEditor() {
           </Card>
         </div>
 
-        {/* right: D&T inputs */}
+        {/* right rail */}
         <div className="space-y-5">
           <Card>
-            <CardHead title="Duties & taxes inputs" sub="Drives the locked BOC lines in the charge table" />
+            <CardHead title="Duties & taxes inputs" sub="Drives the locked D&T expense line" />
             <div className="p-5">
               <fieldset disabled={!editable}>
                 <DtForm inputs={quote.dtInputs} onPatch={patchDt} compact />
@@ -292,7 +322,7 @@ export default function QuoteEditor() {
               <div className="mt-4 rounded-xl bg-navy-50 p-3 space-y-1">
                 {quote.columns.map((c) => (
                   <div key={c} className="flex justify-between text-sm">
-                    <span className="text-slate-600">Payable to BOC · {c}</span>
+                    <span className="text-slate-600">D&T payable to BOC · {c}</span>
                     <span className="tnum font-bold text-navy-800">{peso(dtByCol[c].totalBoc)}</span>
                   </div>
                 ))}
@@ -326,16 +356,16 @@ export default function QuoteEditor() {
       <Modal open={convertOpen} onClose={() => setConvertOpen(false)} title="Convert to shipment"
         footer={<Button tone="ghost" onClick={() => setConvertOpen(false)}>Cancel</Button>}>
         <p className="text-sm text-slate-600 mb-4">
-          Which container option did {clientById(db, quote.clientId)?.name} confirm? The shipment's billing
-          ({(s.dpSplit * 100).toFixed(0)}/{(100 - s.dpSplit * 100).toFixed(0)}) is based on the chosen column.
+          Which option did {client?.name} confirm? Billing ({(s.dpSplit * 100).toFixed(0)}/{(100 - s.dpSplit * 100).toFixed(0)})
+          uses that column's final quotation.
         </p>
         <div className="grid grid-cols-2 gap-3">
           {quote.columns.map((c) => (
             <button key={c} onClick={() => convert(c)}
               className="rounded-xl border-2 border-slate-200 hover:border-navy-600 hover:bg-navy-50 p-4 text-left transition-colors">
               <p className="font-display font-bold text-navy-800">{c}</p>
-              <p className="tnum text-lg font-bold text-slate-900 mt-1">{peso(totals[c].sell, 0)}</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">DP {peso(totals[c].sell * s.dpSplit, 0)} on booking</p>
+              <p className="tnum text-lg font-bold text-slate-900 mt-1">{peso(totals[c].finalQuote, 0)}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">DP {peso(totals[c].finalQuote * s.dpSplit, 0)} on booking</p>
             </button>
           ))}
         </div>
@@ -357,7 +387,7 @@ export default function QuoteEditor() {
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-slate-400 mt-3">Converted to ₱ at the quote's BOC rate. Rows matching the quote's container column(s) are filled.</p>
+        <p className="text-[11px] text-slate-400 mt-3">Sell rate × the quote's exchange rate fills the Air/Ocean Freight line for matching columns.</p>
       </Modal>
     </div>
   )

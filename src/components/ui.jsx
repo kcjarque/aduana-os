@@ -23,6 +23,7 @@ const paths = {
   lock: 'M12 2a5 5 0 0 1 5 5v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a5 5 0 0 1 5-5Zm3 8V7a3 3 0 1 0-6 0v3h6Z',
   alert: 'M12 2 1 21h22L12 2Zm-1 7h2v6h-2V9Zm0 8h2v2h-2v-2Z',
   copy: 'M8 2h11a1 1 0 0 1 1 1v13h-2V4H8V2ZM5 6h11a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm1 2v12h9V8H6Z',
+  layers: 'M12 2 22 7.5 12 13 2 7.5 12 2Zm0 13.3 8.4-4.6 1.6.9L12 17.9 2 11.6l1.6-.9L12 15.3Zm0 4.4 8.4-4.6 1.6.9L12 22.3 2 16l1.6-.9L12 19.7Z',
 }
 
 export const Icon = ({ name, size = 18, className = '' }) => (
@@ -134,9 +135,10 @@ export const LaneBadge = ({ lane }) => {
   return <Badge tone={tone}>{label}</Badge>
 }
 
-export const MarginChip = ({ pctVal, floor = 0.08 }) => {
-  const tone = pctVal >= 0.15 ? 'green' : pctVal >= floor ? 'amber' : 'red'
-  return <Badge tone={tone}>{(pctVal * 100).toFixed(1)}% margin</Badge>
+// Net income vs the client's "PROFIT RANGE: 30K-50K" guidance
+export const IncomeChip = ({ net, floor = 30000, target = 50000 }) => {
+  const tone = net >= target ? 'green' : net >= floor ? 'amber' : 'red'
+  return <Badge tone={tone}>₱{Math.round(net / 1000)}K net</Badge>
 }
 
 export const StatTile = ({ label, value, sub, accent = 'navy' }) => {
