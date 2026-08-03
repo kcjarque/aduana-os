@@ -2,6 +2,16 @@
 
 **Date:** 2026-08-04 · **Status:** Built & deployed (Stage 1 MVP demo)
 
+> **v2 update (same day):** the app now replicates the brokerage's four working
+> Excel files exactly — see `EXCEL-MAPPING.md` for the file-by-file mapping.
+> Key deltas vs the original research-brief build: brokerage = DV×0.125%+₱5,050
+> (flat, client convention), arrastre ₱3,727/₱8,551 & wharfage ₱519.35/₱779.05,
+> CSF $5/$10×E.R. in the BOC summary, flat CDS/IPF, standard dutiable freight
+> defaults, the INQUIRY TOOL's 16 expense lines with FINAL QUOTATION →
+> NET INCOME (cost-plus, ₱30K–50K profit guide) replacing per-line buy/sell,
+> a Consolidation (LCL/FCL) calculator page, the client's 88-line frequently-used
+> tariff list, and the Client's Confirmation Copy block on the printed quote.
+
 Quote-to-clearance platform for a small Philippine customs brokerage / freight
 forwarder. Strategy per design research: copy the *patterns* of GoFreight
 (quote→shipment flow), Freightify (rate cards + margin rules), Zonos/Avalara
