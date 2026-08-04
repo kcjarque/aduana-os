@@ -3,7 +3,7 @@ import { useDb } from '../lib/store'
 import { uid } from '../lib/format'
 import { Card, Button, PageHeader, SearchInput, Badge, Modal, Field, Input, NumInput, Icon, EmptyState } from '../components/ui'
 
-const emptyLine = { code: '', description: '', mfn: 0, atiga: 0, acfta: 0, rcep: 0, note: '' }
+const emptyLine = { code: '', description: '', mfn: 0, atiga: 0, acfta: 0, rcep: 0, note: '', source: 'FAVORITES' }
 const P = ({ v }) => <span className="tnum">{(v * 100).toFixed(v * 100 % 1 ? 1 : 0)}%</span>
 
 export default function Tariff() {
@@ -13,7 +13,9 @@ export default function Tariff() {
 
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return db.tariffLines.filter((t) => !s || t.code.toLowerCase().includes(s) || t.description.toLowerCase().includes(s))
+    return db.tariffLines
+      .filter((t) => !s || t.code.toLowerCase().includes(s) || t.description.toLowerCase().includes(s))
+      .sort((a, b) => (a.source === 'FAVORITES' ? 0 : 1) - (b.source === 'FAVORITES' ? 0 : 1))
   }, [db.tariffLines, q])
 
   const save = () => {
@@ -70,10 +72,16 @@ export default function Tariff() {
               <tbody className="divide-y divide-slate-100">
                 {rows.map((t) => (
                   <tr key={t.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-2.5 tnum font-semibold text-navy-700">{t.code}</td>
+                    <td className="px-5 py-2.5 tnum font-semibold text-navy-700">
+                      <span className="inline-flex items-center gap-1.5">
+                        {t.source === 'FAVORITES' && <span className="text-gold-500" title="Frequently used">★</span>}
+                        {t.code}
+                      </span>
+                    </td>
                     <td className="px-3 py-2.5 text-slate-700">
                       {t.description}
                       {t.note && <Badge tone="amber" className="ml-2">{t.note}</Badge>}
+                      {t.source === 'TARIFF_BOOK_2022' && <Badge tone="slate" className="ml-2">book</Badge>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-semibold"><P v={t.mfn} /></td>
                     <td className="px-3 py-2.5 text-right text-emerald-700"><P v={t.atiga} /></td>

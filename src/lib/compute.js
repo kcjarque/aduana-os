@@ -1,119 +1,195 @@
 // ---------------------------------------------------------------------------
 // BOC Duties & Taxes computation engine — replicates the brokerage's own
-// Excel tools exactly ("COMPUTATION OF DUTIES & TAXES.xlsx" and the legacy
-// "DT CALCULATOR & DOCUMENTATION.xls"). All parameters live in Settings.
+// Excel tools (single-commodity "COMPUTATION OF DUTIES & TAXES.xlsx" and the
+// multi-line legacy "DT CALCULATOR & DOCUMENTATION.xls"). Pure functions only.
+//
+// Money note: the workbooks keep peso figures and round VAT to whole pesos
+// PER LINE on multi-item entries (the IEIRD convention) while the single-
+// commodity quick sheet keeps centavos. We mirror that exactly:
+//   • multi-item (items > 1): round each line's duty & VAT to the peso, sum.
+//   • single-item: keep full precision (matches the quick sheet / Fixture C).
+// Values are JS numbers; we round explicitly at each workbook rounding point
+// (roundPeso) so results are centavo-accurate without a centavo-integer model.
 // ---------------------------------------------------------------------------
 
-// Client convention (both Excel tools): BROKERAGE = DV × 0.125% + 5,050
-// (flat CAO 1-2001 formula applied to the full dutiable value)
-export function brokerageFee(dv, s) {
+const n = (x) => Number(x) || 0
+// half-up peso rounding; tiny epsilon absorbs float representation noise
+export const roundPeso = (x) => Math.round(n(x) + 1e-6)
+
+// ---------------------------------------------------------------------------
+// Brokerage fee — config-driven (Settings › brokerage schedule).
+//   mode 'formula'  → DV × rate + base            (client's current practice)
+//   mode 'brackets' → piecewise table on TOTAL_DV (CAO 1-2001, verify first)
+// ---------------------------------------------------------------------------
+export function brokerageFee(totalDv, s) {
+  const dv = n(totalDv)
   if (dv <= 0) return 0
-  return s.brokerageBase + s.brokerageRate * dv
+  const sch = s.brokerageSchedule || { mode: 'formula', formula: { base: 5050, rate: 0.00125 } }
+  if (sch.mode === 'brackets' && Array.isArray(sch.brackets) && sch.brackets.length) {
+    for (const b of sch.brackets) {
+      if (b.upTo == null || dv <= b.upTo) {
+        if (typeof b.fee === 'object' && b.fee) {
+          return n(b.fee.base) + n(b.fee.rateOnExcess) * Math.max(0, dv - n(b.fee.over))
+        }
+        return n(b.fee)
+      }
+    }
+    const last = sch.brackets[sch.brackets.length - 1]
+    if (typeof last.fee === 'object' && last.fee) {
+      return n(last.fee.base) + n(last.fee.rateOnExcess) * Math.max(0, dv - n(last.fee.over))
+    }
+    return n(last.fee)
+  }
+  const f = sch.formula || { base: 5050, rate: 0.00125 }
+  return dv * n(f.rate) + n(f.base)
 }
 
-// Standard dutiable freight defaults from the client's sheet:
-// LCL $400 / AIR $300 / 20FT $800 / 40FT $1,200
+// Import Processing Fee — flat (default) or CAO 2-2001 brackets on TOTAL_DV
+function ipfFor(totalDv, fp) {
+  if (fp.ipfMode === 'brackets' && Array.isArray(fp.ipfBrackets)) {
+    for (const b of fp.ipfBrackets) if (b.upTo == null || totalDv <= b.upTo) return n(b.fee)
+    return n(fp.ipfBrackets[fp.ipfBrackets.length - 1]?.fee)
+  }
+  return n(fp.ipfFlat)
+}
+
+// Standard dutiable freight (USD): LCL $400 / AIR $300 / 20FT $800 / 40FT $1,200
 export function stdFreightUsd(inputs, s) {
   if (inputs.mode === 'AIR') return s.stdFreight.AIR
   if (inputs.mode === 'LCL') return s.stdFreight.LCL
-  const n20 = Number(inputs.n20) || 0
-  const n40 = Number(inputs.n40) || 0
+  const n20 = n(inputs.n20), n40 = n(inputs.n40)
   return n20 * s.stdFreight['20FT'] + n40 * s.stdFreight['40FT']
 }
 
-export const defaultDtInputs = () => ({
-  incoterm: 'FOB',            // EXWORKS | FOB | FCA | CFR | CIF | DDP
-  currency: 'USD',
-  fxRate: 0,                  // BOC weekly rate; editable like the sheet's cell
-  value: 0,                   // total invoice value in foreign currency
-  freight: 0,                 // dutiable ocean/air freight (foreign currency)
-  insuranceMode: 'general',   // general (2%) | dg (4%) | actual
-  insuranceActual: 0,
-  ahtnCode: '',
-  description: '',
-  basis: 'mfn',               // mfn | atiga | acfta | rcep (Form D / Form E)
-  dutyRate: 0,
-  bankCharges: 0,             // PHP (L/C)
-  excise: 0,                  // PHP, manual (ATRIG goods)
-  vatExempt: false,
-  mode: 'FCL',                // FCL | LCL | AIR
-  n20: 1,                     // number of 20FT containers
-  n40: 0,                     // number of 40FT containers
-  arrastreOverride: null,     // PHP total
-  wharfageOverride: null,
-  brokerageOverride: null,
+export const defaultDtItem = () => ({
+  id: (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)),
+  description: '', ahtnCode: '', basis: 'mfn', dutyRate: 0,
+  value: 0, packages: 0, grossWt: 0, netWt: 0,
 })
+
+export const defaultDtInputs = () => ({
+  incoterm: 'FOB', currency: 'USD', fxRate: 0,
+  freight: 0, insuranceMode: 'general', insuranceActual: 0,
+  bankCharges: 0, excise: 0, vatExempt: false,
+  mode: 'FCL', n20: 1, n40: 0, qtyPerCol: 1,
+  arrastreOverride: null, wharfageOverride: null, brokerageOverride: null,
+  items: [defaultDtItem()],
+})
+
+// Incoterm → whether freight / insurance are added to the customs value
+function incotermFlags(incoterm) {
+  if (incoterm === 'CIF') return { addFreight: false, addInsurance: false }
+  if (incoterm === 'CFR') return { addFreight: false, addInsurance: true }
+  return { addFreight: true, addInsurance: true } // EXWORKS / FOB / FCA / DDP
+}
 
 export function computeDT(inputs, settings) {
   const i = { ...defaultDtInputs(), ...inputs }
   const s = settings
-  const fx = Number(i.fxRate) || 0
-  const value = Number(i.value) || 0
-  const freight = Number(i.freight) || 0
-  const n20 = i.mode === 'FCL' ? Number(i.n20) || 0 : 0
-  const n40 = i.mode === 'FCL' ? Number(i.n40) || 0 : 0
+  const fp = s.feePolicy
+  const items = (i.items && i.items.length ? i.items : [defaultDtItem()])
+  const multi = items.length > 1
+  const fx = n(i.fxRate)
+  const { addFreight, addInsurance } = incotermFlags(i.incoterm)
 
-  // Insurance: 2% of value (general) / 4% (dangerous) — per the client sheet
-  let insurance
-  if (i.insuranceMode === 'actual') insurance = Number(i.insuranceActual) || 0
-  else insurance = value * (i.insuranceMode === 'dg' ? s.insuranceDG : s.insuranceGeneral)
+  const totalValue = items.reduce((a, it) => a + n(it.value), 0)
+  const freight = addFreight ? n(i.freight) : 0
+  const insuranceVal = i.insuranceMode === 'actual'
+    ? n(i.insuranceActual)
+    : totalValue * (i.insuranceMode === 'dg' ? s.insuranceDG : s.insuranceGeneral)
+  const insurance = addInsurance ? insuranceVal : 0
 
-  // Customs value (CIF) by incoterm — CIF already includes freight+insurance
-  let dutiableFx
-  if (i.incoterm === 'CIF') { dutiableFx = value; insurance = 0 }
-  else if (i.incoterm === 'CFR') dutiableFx = value + insurance
-  else dutiableFx = value + freight + insurance // EXWORKS / FOB / FCA / DDP
+  // TOTAL_DV computed directly (not from rounded lines) → exact brokerage base
+  const totalDv = (totalValue + freight + insurance) * fx
 
-  const dv = dutiableFx * fx                       // DUTIABLE VALUE (PHP)
-  const duty = dv * (Number(i.dutyRate) || 0)      // CUSTOMS DUTY
-
+  // Common charges shared across items by value proportion
+  const n20 = i.mode === 'FCL' ? n(i.n20) : 0
+  const n40 = i.mode === 'FCL' ? n(i.n40) : 0
   const brokerage = i.brokerageOverride != null && i.brokerageOverride !== ''
-    ? Number(i.brokerageOverride) : brokerageFee(dv, s)
-
-  // Port charges per container type (client figures: sheet cells D35–D38)
+    ? n(i.brokerageOverride) : brokerageFee(totalDv, s)
   const arrastre = i.arrastreOverride != null && i.arrastreOverride !== ''
-    ? Number(i.arrastreOverride)
+    ? n(i.arrastreOverride)
     : i.mode === 'FCL' ? n20 * s.arrastre['20FT'] + n40 * s.arrastre['40FT'] : s.arrastre.LCL
   const wharfage = i.wharfageOverride != null && i.wharfageOverride !== ''
-    ? Number(i.wharfageOverride)
+    ? n(i.wharfageOverride)
     : i.mode === 'FCL' ? n20 * s.wharfage['20FT'] + n40 * s.wharfage['40FT'] : s.wharfage.LCL
+  const cds = n(fp.cds)
+  const ipfSummary = ipfFor(totalDv, fp)
+  const ipfLanded = fp.ipfLegacySplit ? n(fp.ipfLandedCost) : ipfSummary
+  const bank = n(i.bankCharges)
+  const excise = n(i.excise)
 
-  const cds = s.cds                                // flat, per sheet ("STANDARD")
-  const ipf = s.ipf                                // flat, per sheet ("STANDARD")
-  const bank = Number(i.bankCharges) || 0
-  const excise = Number(i.excise) || 0
+  // Common charges that fold into landed cost (VAT base), prorated by value
+  const commonLanded = brokerage + bank + wharfage + arrastre + cds + ipfLanded
 
-  // LANDED COST = DV + duty + brokerage + bank + wharfage + arrastre + CDS + IPF
-  const landedCost = dv + duty + brokerage + bank + wharfage + arrastre + cds + ipf + excise
-  const vat = i.vatExempt ? 0 : landedCost * s.vatRate
+  // Per-item breakdown
+  const lines = items.map((it) => {
+    const share = totalValue > 0 ? n(it.value) / totalValue : (1 / items.length)
+    const dvExact = (n(it.value) + freight * share + insurance * share) * fx
+    const dutyExact = dvExact * n(it.dutyRate)
+    const duty = multi ? roundPeso(dutyExact) : dutyExact
+    const lc = dvExact + duty + commonLanded * share
+    const vat = i.vatExempt ? 0 : (multi ? roundPeso(lc * s.vatRate) : lc * s.vatRate)
+    return {
+      id: it.id, description: it.description, ahtnCode: it.ahtnCode, basis: it.basis,
+      dutyRate: n(it.dutyRate), value: n(it.value), share,
+      dv: dvExact, duty, landedCost: lc, vat,
+    }
+  })
 
-  // CSF (container security fee): $5 × ER per 20FT / $10 × ER per 40FT
-  const csf = (n20 * s.csfUsd['20FT'] + n40 * s.csfUsd['40FT']) * fx
+  // Reconcile displayed DV so Σ line.dv ties to totalDv (residual → largest line)
+  const dvSum = lines.reduce((a, l) => a + l.dv, 0)
+  const residual = totalDv - dvSum
+  if (Math.abs(residual) > 1e-6 && lines.length) {
+    const big = lines.reduce((m, l) => (l.value > m.value ? l : m), lines[0])
+    big.dv += residual
+  }
 
-  // Client's SUMMARY block: VAT + duty + IPF + CDS + CSF (+ excise) = customs total
-  const totalBoc = vat + duty + ipf + cds + csf + excise
+  const totalDuty = lines.reduce((a, l) => a + l.duty, 0)
+  const totalVat = lines.reduce((a, l) => a + l.vat, 0)
+  const landedCost = totalDv + totalDuty + commonLanded
+
+  // CSF: $5/20FT + $10/40FT × E.R., rounded to peso (per the summary block)
+  const csf = roundPeso((n20 * s.csfUsd['20FT'] + n40 * s.csfUsd['40FT']) * fx)
+
+  // Summary — amount payable to BOC
+  const totalBoc = totalVat + totalDuty + ipfSummary
+    + (fp.cdsInSummary ? cds : 0) + excise + csf
   const totalCharges = totalBoc + brokerage + arrastre + wharfage + bank
 
+  // convenience aliases for existing single-item readers / print header
+  const first = items[0] || defaultDtItem()
+
   return {
-    fx, dutiableFx, insurance, dv, duty, brokerage, arrastre, wharfage,
-    cds, ipf, bank, excise, csf, landedCost, vat, totalBoc, totalCharges,
+    fx, totalValue, freight, insurance, insuranceVal,
+    dv: totalDv, duty: totalDuty, brokerage, arrastre, wharfage,
+    cds, ipf: ipfSummary, ipfLanded, ipfSummary, bank, excise, csf,
+    landedCost, vat: totalVat, totalBoc, totalCharges,
+    lines, itemCount: items.length, multi,
     n20, n40, mode: i.mode,
+    // header helpers
+    ahtnLabel: multi ? 'Various — see itemization' : (first.ahtnCode || '—'),
+    basis: first.basis, dutyRate: n(first.dutyRate),
+    // legacy field name used by the breakdown component
+    dutiableFx: totalValue + freight + insurance,
   }
 }
 
 // ---------------------------------------------------------------------------
-// Quotation math — mirrors the client's INQUIRY TOOL exactly:
-// 16 expense lines per container column, TOTAL EXPENSES, a manually set
-// FINAL QUOTATION, GROSS INCOME = final − expenses, container-deposit refund
-// added back, NET INCOME = gross + refund.
+// Column mapping for a quote (20FT / 40FT / LCL / AIR)
 // ---------------------------------------------------------------------------
 export function dtInputsForCol(dtInputs, col) {
-  if (col === '40FT') return { ...dtInputs, mode: 'FCL', n20: 0, n40: Math.max(1, Number(dtInputs.qtyPerCol) || 1) }
-  if (col === '20FT') return { ...dtInputs, mode: 'FCL', n20: Math.max(1, Number(dtInputs.qtyPerCol) || 1), n40: 0 }
+  const q = Math.max(1, n(dtInputs.qtyPerCol) || 1)
+  if (col === '40FT') return { ...dtInputs, mode: 'FCL', n20: 0, n40: q }
+  if (col === '20FT') return { ...dtInputs, mode: 'FCL', n20: q, n40: 0 }
   if (col === 'AIR') return { ...dtInputs, mode: 'AIR', n20: 0, n40: 0 }
   return { ...dtInputs, mode: 'LCL', n20: 0, n40: 0 } // LCL
 }
 
+// ---------------------------------------------------------------------------
+// Quotation math — the INQUIRY TOOL: 16 expense lines → TOTAL EXPENSES →
+// FINAL QUOTATION (manual) → GROSS INCOME → + deposit refund → NET INCOME.
+// ---------------------------------------------------------------------------
 export function quoteTotals(quote, dtByCol) {
   const totals = {}
   for (const col of quote.columns) {
@@ -121,11 +197,11 @@ export function quoteTotals(quote, dtByCol) {
     for (const ln of quote.lines) {
       const amt = ln.key === 'dt'
         ? (dtByCol[col]?.totalBoc ?? 0)
-        : Number(ln.values?.[col]) || 0
+        : n(ln.values?.[col])
       expenses += amt
       if (ln.refundable) refund += amt
     }
-    const finalQuote = Number(quote.finalQuote?.[col]) || 0
+    const finalQuote = n(quote.finalQuote?.[col])
     const gross = finalQuote - expenses
     const net = gross + refund
     totals[col] = { expenses, finalQuote, gross, refund, net }

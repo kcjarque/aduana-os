@@ -407,6 +407,49 @@ anything that differs:
 
 ---
 
-*Companion docs in this repo:* **EXCEL-MAPPING.md** (file-by-file mapping of
-the four workbooks into the app) · **SPEC.md** (original design spec + v2
-update note).*
+---
+
+## 7. Addendum — audit-gap closure (v3)
+
+Six gaps from the first audit are now closed. Details and the on-screen proof
+are in **PUNCHLIST-STATUS.md**; in plain English:
+
+- **Multi-item entries (up to 18 tariff lines).** The estimator and every
+  quotation now take a list of tariff lines, each with its own H.S. code, basis,
+  rate, and value. Freight and insurance are prorated across the lines by value
+  share, duty uses each line's own rate, and VAT rounds per line — matching the
+  legacy IEIRD worksheet to the peso. The seeded quote **AQ-2026-0102** is a
+  real 4-line "ovens & cables" entry to demo this. *Single-commodity entries are
+  just a one-row list — nothing changed for them.*
+- **Trucking auto-fills by city.** Delivery address is now Province → City/
+  Municipality → street. Pick a city and line 11 (Trucking & Delivery) fills
+  itself from the trucking tariff, per container size, with a "from tariff"
+  chip. No tariff row for that city → an amber "enter manually" hint. Manage the
+  rate table in Settings → Trucking (seeded with SAMPLE figures — your real
+  sheet drops straight in).
+- **Inquiry completeness check ("kompleto ba?").** Every quotation shows an
+  `x/12 complete` pill; the checklist knows the conditional fields (EXWORKS needs
+  a pickup address, FOB needs a port of loading, FCL needs container counts…).
+  "Mark sent" is blocked until complete (drafts always save), and one button
+  copies a ready **Taglish follow-up** listing exactly what's still needed.
+- **Brokerage schedule is a setting.** Default is the client's formula
+  (DV × 0.125% + ₱5,050). A CAO 1-2001 bracket table is included for small
+  shipments but badged **VERIFY before enabling** — confirm at demo, then flip.
+- **Bigger tariff library.** The 88 favorites (★, ranked first) now sit
+  alongside ~25 AHTN 2022 chapter rows (plastics, steel, machinery, furniture,
+  tagged "book") so a search for an unlisted commodity still lands somewhere.
+- **BOC fee policy in one card.** CDS amount + "include in summary" toggle, IPF
+  flat vs CAO brackets, and an advanced legacy-split — so when the client says
+  "we use ₱130 CDS," you flip it and every figure updates on screen. This turns
+  the old audit footnote (§4.1–4.3) into a 10-second live answer.
+
+**Engine tests:** the file `scripts/verify-fixtures.mjs` asserts the D&T engine
+against the workbooks' own worked examples (the legacy 4-item VAGUS entry
+→ ₱150,610, the same entry under current policy → ₱150,995, and the single-item
+regression → ₱579,062.79). Run `npm run verify` any time.
+
+---
+
+*Companion docs in this repo:* **PUNCHLIST-STATUS.md** (gap-closure detail +
+demo-day questions) · **EXCEL-MAPPING.md** (file-by-file mapping of the four
+workbooks) · **SPEC.md** (design spec + update notes).*
