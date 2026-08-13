@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { useDb } from './lib/store'
+import { useAuth } from './lib/auth'
 import { Icon, Toasts } from './components/ui'
 import { FxChip } from './components/dt'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Estimator from './pages/Estimator'
 import Quotes from './pages/Quotes'
@@ -31,6 +33,7 @@ const NAV = [
 
 function Shell({ children }) {
   const { db, toasts } = useDb()
+  const { user, logout } = useAuth()
   return (
     <div className="min-h-full flex">
       <aside className="w-60 shrink-0 sidebar-gradient text-slate-300 flex flex-col fixed inset-y-0 z-40">
@@ -77,12 +80,15 @@ function Shell({ children }) {
           <div className="flex items-center gap-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 rounded-full px-2.5 py-1">Demo workspace</span>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-navy-800 text-white flex items-center justify-center text-xs font-bold">RS</div>
+              <div className="w-8 h-8 rounded-full bg-navy-800 text-white flex items-center justify-center text-xs font-bold">{user?.initials || 'RS'}</div>
               <div className="leading-tight hidden sm:block">
-                <p className="text-xs font-semibold text-slate-800">{db.settings.company.rep}</p>
-                <p className="text-[10px] text-slate-400">Licensed Customs Broker</p>
+                <p className="text-xs font-semibold text-slate-800">{user?.name || db.settings.company.rep}</p>
+                <p className="text-[10px] text-slate-400">{user?.role || 'Licensed Customs Broker'}</p>
               </div>
             </div>
+            <button onClick={logout} title="Sign out" className="ml-1 text-slate-400 hover:text-red-500 flex items-center gap-1 text-xs font-medium">
+              <Icon name="lock" size={15} /> <span className="hidden sm:inline">Sign out</span>
+            </button>
           </div>
         </header>
         <main className="flex-1 px-6 py-6 max-w-[1400px] w-full mx-auto">{children}</main>
@@ -93,6 +99,8 @@ function Shell({ children }) {
 }
 
 export default function App() {
+  const { user } = useAuth()
+  if (!user) return <Login />
   return (
     <BrowserRouter>
       <Routed />
