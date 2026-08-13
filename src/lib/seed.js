@@ -7,14 +7,14 @@ import { truckingSeed } from './trucking'
 // ---------------------------------------------------------------------------
 export const defaultSettings = {
   company: {
-    name: 'H.R. Villa Customs Brokerage',
+    name: 'Marc Castro Customs Brokerage',
     tagline: 'Licensed Customs Brokerage & Freight Forwarding',
     address: 'Port Area, Manila',
     tin: '000-000-000-000',
     ccb: 'PRC-CCB No. ____ · BOC Accreditation ____',
     phone: '(02) 8000-0000',
-    email: 'ops@hrvilla.ph',
-    rep: 'H.R. Villa, LCB',
+    email: 'ops@marccastro.ph',
+    rep: 'Marc Castro, LCB',
   },
   vatRate: 0.12,
   insuranceGeneral: 0.02,       // 2% of value — general cargo
@@ -542,7 +542,7 @@ function makeSeed() {
   }
 
   return {
-    version: 6,
+    version: 7,
     settings: defaultSettings,
     fxWeeks,
     tariffLines: tariffSeed.map((t) => ({ id: uid(), ...t })),

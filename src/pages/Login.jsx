@@ -29,7 +29,7 @@ export default function Login() {
           </h1>
           <p className="mt-3 text-sm text-slate-400 max-w-sm">
             Duties &amp; taxes estimator, instant quotations, and shipment clearance tracking —
-            built on H.R. Villa's own worksheets.
+            built on Marc Castro's own worksheets.
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             {['BOC D&T engine', 'Multi-item entries', '70/30 billing', 'Clearance board'].map((t) => (
@@ -37,7 +37,7 @@ export default function Login() {
             ))}
           </div>
         </div>
-        <p className="text-[11px] text-slate-500">H.R. Villa Customs Brokerage · demo workspace</p>
+        <p className="text-[11px] text-slate-500">Marc Castro Customs Brokerage · demo workspace</p>
       </div>
 
       {/* right — login card */}

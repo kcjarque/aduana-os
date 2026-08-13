@@ -35,7 +35,7 @@ export const useAuth = () => useContext(AuthCtx)
 
 // demo accounts — one-tap, no password (keyless in-browser demo)
 export const DEMO_USERS = [
-  { name: 'Rowena D. Santos, LCB', role: 'Licensed Customs Broker', initials: 'RS' },
-  { name: 'Marco Encoder', role: 'Entry Encoder / Ops', initials: 'ME' },
+  { name: 'Marc Castro, LCB', role: 'Licensed Customs Broker', initials: 'MC' },
+  { name: 'Joan dela Cruz', role: 'Entry Encoder / Ops', initials: 'JC' },
   { name: 'Ana Reyes', role: 'Sales / Client Relations', initials: 'AR' },
 ]

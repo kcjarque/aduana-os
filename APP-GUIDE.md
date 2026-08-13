@@ -1,7 +1,7 @@
 # AduanaOS — Complete App Guide (Plain English)
 
 **Live app:** https://aduana-os.vercel.app
-**Who it's for:** H.R. Villa Customs Brokerage — quotation and clearance operations
+**Who it's for:** Marc Castro Customs Brokerage — quotation and clearance operations
 **Purpose of this document:** describe everything the app does, in the order the
 brokerage actually works, so you can audit it screen-by-screen against the real
 workflow and flag anything that's missing, wrong, or named differently than how

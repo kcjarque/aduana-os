@@ -80,7 +80,7 @@ function Shell({ children }) {
           <div className="flex items-center gap-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 rounded-full px-2.5 py-1">Demo workspace</span>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-navy-800 text-white flex items-center justify-center text-xs font-bold">{user?.initials || 'RS'}</div>
+              <div className="w-8 h-8 rounded-full bg-navy-800 text-white flex items-center justify-center text-xs font-bold">{user?.initials || 'MC'}</div>
               <div className="leading-tight hidden sm:block">
                 <p className="text-xs font-semibold text-slate-800">{user?.name || db.settings.company.rep}</p>
                 <p className="text-[10px] text-slate-400">{user?.role || 'Licensed Customs Broker'}</p>
