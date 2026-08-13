@@ -494,8 +494,10 @@ function makeSeed() {
   ]
 
   // -------- consolidation calculator (LCL & FCL sheets, verbatim) --------
-  const row = (label, currency, rate, qty, unit, fx, vatable) =>
-    ({ id: uid(), label, currency, rate, qty, unit, fx: fx ?? 1, vatable: !!vatable })
+  // inEstimate=false → shown for reference but excluded from the estimate total
+  // (mirrors the FCL sheet's B16 which drops the prepaid exworks charge).
+  const row = (label, currency, rate, qty, unit, fx, vatable, inEstimate = true) =>
+    ({ id: uid(), label, currency, rate, qty, unit, fx: fx ?? 1, vatable: !!vatable, inEstimate })
   const consolidation = {
     LCL: [
       { id: uid(), title: 'Origin / Freight', vatOnGroup: false, rows: [
@@ -527,7 +529,7 @@ function makeSeed() {
     ],
     FCL: [
       { id: uid(), title: 'Origin', vatOnGroup: false, rows: [
-        row('Exworks Charges', 'USD', 1200, 1, 'CNTR', fxNow),
+        row('Exworks Charges', 'USD', 1200, 1, 'CNTR', fxNow, false, false), // prepaid — excl. from estimate (sheet B16)
         row('Ocean Freight', 'USD', 600, 1, 'CNTR', fxNow),
       ] },
       { id: uid(), title: 'Destination', vatOnGroup: false, rows: [
@@ -540,7 +542,7 @@ function makeSeed() {
   }
 
   return {
-    version: 5,
+    version: 6,
     settings: defaultSettings,
     fxWeeks,
     tariffLines: tariffSeed.map((t) => ({ id: uid(), ...t })),

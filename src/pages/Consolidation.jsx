@@ -17,8 +17,11 @@ export default function Consolidation() {
   const totals = useMemo(() => {
     let grand = 0
     const byGroup = groups.map((g) => {
-      const sub = g.rows.reduce((a, r) => a + rowAmount(r), 0)
-      const vat = g.vatOnGroup ? g.rows.filter((r) => r.vatable).reduce((a, r) => a + rowAmount(r), 0) * db.settings.vatRate : 0
+      // estimate = included rows only (a row flagged inEstimate:false — e.g. prepaid
+      // exworks — is shown for reference but excluded, mirroring the FCL sheet's B16)
+      const incl = g.rows.filter((r) => r.inEstimate !== false)
+      const sub = incl.reduce((a, r) => a + rowAmount(r), 0)
+      const vat = g.vatOnGroup ? incl.filter((r) => r.vatable).reduce((a, r) => a + rowAmount(r), 0) * db.settings.vatRate : 0
       grand += sub + vat
       return { id: g.id, title: g.title, sub, vat, total: sub + vat }
     })
@@ -82,6 +85,7 @@ export default function Consolidation() {
                       <th className="px-2 py-2 font-semibold w-24">Unit</th>
                       <th className="px-2 py-2 font-semibold w-24 text-right">E.R. / Days</th>
                       <th className="px-2 py-2 font-semibold w-16 text-center">VAT?</th>
+                      <th className="px-2 py-2 font-semibold w-16 text-center" title="Include in the estimate total">In est.</th>
                       <th className="px-3 py-2 font-semibold w-28 text-right">Amount (₱)</th>
                       <th className="w-8" />
                     </tr>
@@ -113,7 +117,14 @@ export default function Consolidation() {
                             disabled={!g.vatOnGroup}
                             onChange={(e) => patchRow(g.id, r.id, { vatable: e.target.checked })} />
                         </td>
-                        <td className="px-3 py-1.5 text-right tnum font-semibold text-slate-800">{peso(rowAmount(r), 2)}</td>
+                        <td className="px-2 py-1.5 text-center">
+                          <input type="checkbox" className="accent-emerald-600 w-4 h-4" checked={r.inEstimate !== false}
+                            title="Include in estimate total"
+                            onChange={(e) => patchRow(g.id, r.id, { inEstimate: e.target.checked })} />
+                        </td>
+                        <td className={`px-3 py-1.5 text-right tnum font-semibold ${r.inEstimate === false ? 'text-slate-300 line-through' : 'text-slate-800'}`}>
+                          {peso(rowAmount(r), 2)}
+                        </td>
                         <td className="pr-3">
                           <button onClick={() => removeRow(g.id, r.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500">
                             <Icon name="trash" size={14} />
@@ -125,13 +136,13 @@ export default function Consolidation() {
                   <tfoot>
                     {g.vatOnGroup && (
                       <tr className="border-t border-slate-100">
-                        <td colSpan={7} className="px-5 py-2 text-xs text-slate-500">VAT 12% (on flagged rows)</td>
+                        <td colSpan={8} className="px-5 py-2 text-xs text-slate-500">VAT 12% (on flagged rows)</td>
                         <td className="px-3 py-2 text-right tnum text-slate-600">{peso(totals.byGroup.find((x) => x.id === g.id)?.vat ?? 0, 2)}</td>
                         <td />
                       </tr>
                     )}
                     <tr className="border-t border-slate-200 bg-slate-50/60">
-                      <td colSpan={7} className="px-5 py-2.5 font-semibold text-slate-900">{g.title} subtotal</td>
+                      <td colSpan={8} className="px-5 py-2.5 font-semibold text-slate-900">{g.title} subtotal</td>
                       <td className="px-3 py-2.5 text-right tnum font-bold text-navy-800">{peso(totals.byGroup.find((x) => x.id === g.id)?.total ?? 0, 2)}</td>
                       <td />
                     </tr>
